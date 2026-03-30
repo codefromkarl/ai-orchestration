@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stardrifter-orchestration-mvp"
+version = "0.1.0"
+description = "PostgreSQL-backed orchestration control plane MVP for Starsector migration work."
+requires-python = ">=3.11"
+dependencies = [
+    "psycopg[binary]>=3.2,<4",
+    "fastapi>=0.110,<1",
+    "uvicorn[standard]>=0.29,<1",
+]
+
+[project.scripts]
+stardrifter-orchestration-worker = "stardrifter_orchestration_mvp.cli:entrypoint"
+stardrifter-orchestration-operator = "stardrifter_orchestration_mvp.operator_cli:entrypoint"
+stardrifter-orchestration-import = "stardrifter_orchestration_mvp.import_cli:entrypoint"
+stardrifter-orchestration-project = "stardrifter_orchestration_mvp.projection_sync_cli:entrypoint"
+stardrifter-orchestration-governance = "stardrifter_orchestration_mvp.governance_sync_cli:entrypoint"
+stardrifter-orchestration-governance-state = "stardrifter_orchestration_mvp.governance_state_cli:entrypoint"
+stardrifter-orchestration-governance-report = "stardrifter_orchestration_mvp.governance_report_cli:entrypoint"
+stardrifter-orchestration-governance-priority = "stardrifter_orchestration_mvp.governance_priority_cli:entrypoint"
+stardrifter-orchestration-decompose = "stardrifter_orchestration_mvp.story_decomposition_cli:entrypoint"
+stardrifter-orchestration-story = "stardrifter_orchestration_mvp.story_runner_cli:entrypoint"
+stardrifter-orchestration-supervisor = "stardrifter_orchestration_mvp.supervisor_loop:main"
+stardrifter-orchestration-triage = "stardrifter_orchestration_mvp.triage_report_cli:entrypoint"
+stardrifter-orchestration-attempt-report = "stardrifter_orchestration_mvp.attempt_report_cli:entrypoint"
+stardrifter-orchestration-reconciliation-report = "stardrifter_orchestration_mvp.reconciliation_report_cli:entrypoint"
+stardrifter-orchestration-loop = "stardrifter_orchestration_mvp.orchestration_loop:entrypoint"
+stardrifter-orchestration-hierarchy = "stardrifter_orchestration_mvp.hierarchy_report_cli:entrypoint"
+stardrifter-orchestration-ui = "stardrifter_orchestration_mvp.hierarchy_api_cli:entrypoint"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: end-to-end or database-backed integration coverage",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

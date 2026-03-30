@@ -1,0 +1,39 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.nocodb.example
+
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+*.pyc
+*.egg-info/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build / runtime artifacts
+dist/
+logs/
+.run-logs/
+
+# Local tool state
+.omc/
+.project-memory/
+.sisyphus/
+.workflow/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+
+# Local markers
+\[committed\]
+\[completed\]n
+\[progressing\]n

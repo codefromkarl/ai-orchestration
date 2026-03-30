@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: stardrifter-orchestration-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-stardrifter_orchestration}
+      POSTGRES_USER: ${POSTGRES_USER:-stardrifter}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stardrifter}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../sql/control_plane_schema.sql:/docker-entrypoint-initdb.d/10-control-plane-schema.sql:ro
+      - ../sql/nocodb_views.sql:/docker-entrypoint-initdb.d/20-nocodb-views.sql:ro
+
+  metabase:
+    image: metabase/metabase:latest
+    container_name: stardrifter-orchestration-metabase
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_DBNAME: metabase_db
+      MB_DB_PORT: 5432
+      MB_DB_USER: ${POSTGRES_USER:-stardrifter}
+      MB_DB_PASS: ${POSTGRES_PASSWORD:-stardrifter}
+      MB_DB_HOST: postgres
+    ports:
+      - "${METABASE_PORT:-3100}:3000"
+    volumes:
+      - metabase_data:/metabase-data
+
+volumes:
+  postgres_data:
+  metabase_data:

@@ -1,0 +1,192 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-size: 16px;
+  --color-background: #ffffff;
+  --color-surface: #f9fafb;
+  --color-surface-hover: #f3f4f6;
+  --color-border: #e5e7eb;
+  --color-text: #111827;
+  --color-text-secondary: #6b7280;
+  --color-primary: #3b82f6;
+  --color-primary-hover: #2563eb;
+  --color-accent: #8b5cf6;
+  /* Radius */
+  --radius-xl: 24px;
+  --radius-lg: 18px;
+  --radius-md: 12px;
+  --radius-sm: 10px;
+  /* Shadow */
+  --shadow-lg: 0 24px 48px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 10px 24px rgba(0, 0, 0, 0.08);
+  /* Badge - light theme */
+  --badge-pending-bg: #f1f5f9;
+  --badge-pending-text: #64748b;
+  --badge-ready-bg: #fef3c7;
+  --badge-ready-text: #92400e;
+  --badge-in_progress-bg: #dbeafe;
+  --badge-in_progress-text: #1d4ed8;
+  --badge-verifying-bg: #f3e8ff;
+  --badge-verifying-text: #6b21a8;
+  --badge-blocked-bg: #fee2e2;
+  --badge-blocked-text: #991b1b;
+  --badge-done-bg: #dcfce7;
+  --badge-done-text: #166534;
+}
+
+.dark {
+  --color-background: #0f172a;
+  --color-surface: #1e293b;
+  --color-surface-hover: #334155;
+  --color-border: #334155;
+  --color-text: #f1f5f9;
+  --color-text-secondary: #94a3b8;
+  --color-primary: #3b82f6;
+  --color-primary-hover: #2563eb;
+  --color-accent: #8b5cf6;
+  /* Shadow - dark */
+  --shadow-lg: 0 24px 48px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 10px 24px rgba(0, 0, 0, 0.25);
+  /* Badge - dark theme */
+  --badge-pending-bg: rgba(100, 116, 139, 0.18);
+  --badge-pending-text: #94a3b8;
+  --badge-ready-bg: rgba(245, 158, 11, 0.18);
+  --badge-ready-text: #fbbf24;
+  --badge-in_progress-bg: rgba(59, 130, 246, 0.18);
+  --badge-in_progress-text: #60a5fa;
+  --badge-verifying-bg: rgba(168, 85, 247, 0.18);
+  --badge-verifying-text: #c084fc;
+  --badge-blocked-bg: rgba(239, 68, 68, 0.18);
+  --badge-blocked-text: #fca5a5;
+  --badge-done-bg: rgba(34, 197, 94, 0.18);
+  --badge-done-text: #86efac;
+}
+
+.theme-cyberpunk {
+  --color-background: #0a0a1f;
+  --color-surface: #1a1a3e;
+  --color-surface-hover: #2a2a5e;
+  --color-border: #ff00ff;
+  --color-text: #00ffff;
+  --color-text-secondary: #ff00ff;
+  --color-primary: #ff00ff;
+  --color-primary-hover: #cc00cc;
+  --color-accent: #00ffff;
+  /* Shadow - cyberpunk */
+  --shadow-lg: 0 24px 48px rgba(255, 0, 255, 0.15);
+  --shadow-md: 0 10px 24px rgba(255, 0, 255, 0.1);
+  /* Badge - cyberpunk theme */
+  --badge-pending-bg: rgba(100, 116, 139, 0.2);
+  --badge-pending-text: #00ffff;
+  --badge-ready-bg: rgba(245, 158, 11, 0.2);
+  --badge-ready-text: #fbbf24;
+  --badge-in_progress-bg: rgba(255, 0, 255, 0.15);
+  --badge-in_progress-text: #ff00ff;
+  --badge-verifying-bg: rgba(168, 85, 247, 0.2);
+  --badge-verifying-text: #c084fc;
+  --badge-blocked-bg: rgba(239, 68, 68, 0.2);
+  --badge-blocked-text: #ff6666;
+  --badge-done-bg: rgba(34, 197, 94, 0.2);
+  --badge-done-text: #00ff88;
+}
+
+.theme-programmer {
+  --color-background: #1e1e1e;
+  --color-surface: #252526;
+  --color-surface-hover: #2d2d30;
+  --color-border: #3e3e42;
+  --color-text: #d4d4d4;
+  --color-text-secondary: #858585;
+  --color-primary: #4ec9b0;
+  --color-primary-hover: #3ea88c;
+  --color-accent: #569cd6;
+  /* Shadow - programmer */
+  --shadow-lg: 0 24px 48px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 10px 24px rgba(0, 0, 0, 0.28);
+  /* Badge - programmer theme */
+  --badge-pending-bg: rgba(133, 133, 133, 0.2);
+  --badge-pending-text: #858585;
+  --badge-ready-bg: rgba(220, 220, 170, 0.18);
+  --badge-ready-text: #dcdcaa;
+  --badge-in_progress-bg: rgba(86, 156, 214, 0.18);
+  --badge-in_progress-text: #569cd6;
+  --badge-verifying-bg: rgba(78, 201, 176, 0.18);
+  --badge-verifying-text: #4ec9b0;
+  --badge-blocked-bg: rgba(239, 68, 68, 0.18);
+  --badge-blocked-text: #f48771;
+  --badge-done-bg: rgba(34, 197, 94, 0.18);
+  --badge-done-text: #6a9955;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background-color: var(--color-background);
+  color: var(--color-text);
+}
+
+@layer components {
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold;
+  }
+
+  .badge-pending {
+    background-color: var(--badge-pending-bg);
+    color: var(--badge-pending-text);
+  }
+
+  .badge-ready {
+    background-color: var(--badge-ready-bg);
+    color: var(--badge-ready-text);
+  }
+
+  .badge-in_progress {
+    background-color: var(--badge-in_progress-bg);
+    color: var(--badge-in_progress-text);
+  }
+
+  .badge-verifying {
+    background-color: var(--badge-verifying-bg);
+    color: var(--badge-verifying-text);
+  }
+
+  .badge-blocked {
+    background-color: var(--badge-blocked-bg);
+    color: var(--badge-blocked-text);
+  }
+
+  .badge-done {
+    background-color: var(--badge-done-bg);
+    color: var(--badge-done-text);
+  }
+
+  /* D3 Hierarchy tree links */
+  .link {
+    fill: none;
+    stroke: #94a3b8;
+    stroke-width: 1.5px;
+  }
+
+  .node circle {
+    cursor: pointer;
+    stroke-width: 2;
+    transition: transform 0.16s ease, filter 0.16s ease, stroke-width 0.16s ease;
+  }
+
+  .node:hover circle {
+    filter: brightness(1.06);
+    stroke-width: 2.5;
+  }
+}
