@@ -3,6 +3,7 @@ from pathlib import Path
 from stardrifter_orchestration_mvp.task_verifier import (
     _build_verifier_env,
     _extract_explicit_commands,
+    _extract_pytest_targets_from_changed_paths,
     _extract_pytest_targets,
     _resolve_verification_commands,
     _should_treat_as_implementation_only_with_external_test_ownership,
@@ -63,6 +64,38 @@ def test_extract_pytest_targets_uses_issue_body_test_paths(tmp_path):
         "tests/unit/test_campaign_topology_schema_closure.py",
         "tests/unit/test_starsector_campaign_conversion.py",
     ]
+
+
+def test_extract_pytest_targets_from_changed_paths_prefers_changed_test_files(
+    tmp_path, monkeypatch
+):
+    tests_dir = tmp_path / "tests" / "unit"
+    tests_dir.mkdir(parents=True)
+    (tests_dir / "test_csv_parser.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+    monkeypatch.setenv(
+        "STARDRIFTER_EXECUTION_CHANGED_PATHS_JSON",
+        '["tests/unit/test_csv_parser.py"]',
+    )
+
+    targets = _extract_pytest_targets_from_changed_paths(project_dir=tmp_path)
+
+    assert targets == ["tests/unit/test_csv_parser.py"]
+
+
+def test_extract_pytest_targets_from_changed_paths_infers_unit_test_from_source_path(
+    tmp_path, monkeypatch
+):
+    tests_dir = tmp_path / "tests" / "unit"
+    tests_dir.mkdir(parents=True)
+    (tests_dir / "test_csv_parser.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+    monkeypatch.setenv(
+        "STARDRIFTER_EXECUTION_CHANGED_PATHS_JSON",
+        '["src/stardrifter_engine/data_loading/csv_parser.py"]',
+    )
+
+    targets = _extract_pytest_targets_from_changed_paths(project_dir=tmp_path)
+
+    assert targets == ["tests/unit/test_csv_parser.py"]
 
 
 def test_resolve_verification_commands_falls_back_to_focused_pytest_targets(tmp_path):

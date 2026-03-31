@@ -5,6 +5,7 @@ PROJECT_DIR="${STARDRIFTER_PROJECT_DIR:-/home/yuanzhi/Develop/playground/stardri
 WORK_ID="${STARDRIFTER_WORK_ID:-unknown}"
 WORK_TITLE="${STARDRIFTER_WORK_TITLE:-}"
 EXECUTION_CONTEXT_JSON="${STARDRIFTER_EXECUTION_CONTEXT_JSON:-}"
+EXECUTOR_TIMEOUT_SECONDS="${STARDRIFTER_EXECUTOR_TIMEOUT_SECONDS:-600}"
 LOG_DIR="${STARDRIFTER_EXECUTOR_LOG_DIR:-/tmp/stardrifter-codex-exec}"
 mkdir -p "${LOG_DIR}"
 LOG_FILE="${LOG_DIR}/${WORK_ID}.log"
@@ -41,7 +42,7 @@ EOF
 )
 
 set +e
-RUST_LOG=error codex exec \
+RUST_LOG=error timeout --signal=TERM --kill-after=30 "${EXECUTOR_TIMEOUT_SECONDS}s" codex exec \
   --dangerously-bypass-approvals-and-sandbox \
   --skip-git-repo-check \
   --cd "$PROJECT_DIR" \
@@ -85,10 +86,13 @@ elif codex_exit == 0:
         "preexisting_dirty_paths": sorted(before_set),
     }
 else:
+    reason_code = "executor_non_zero_exit"
+    if codex_exit in {124, 137}:
+        reason_code = "executor_timeout"
     payload = {
         "execution_kind": "terminal",
         "outcome": "blocked",
-        "reason_code": "executor_non_zero_exit",
+        "reason_code": reason_code,
         "summary": f"codex executor failed for {work_id} with exit code {codex_exit}",
         "changed_paths": changed_paths,
         "preexisting_dirty_paths": sorted(before_set),

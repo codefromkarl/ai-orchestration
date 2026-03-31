@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import re
@@ -85,6 +86,11 @@ def _resolve_verification_commands(
     explicit_commands = _extract_explicit_commands(body)
     if explicit_commands:
         return explicit_commands
+    changed_path_targets = _extract_pytest_targets_from_changed_paths(
+        project_dir=project_dir
+    )
+    if changed_path_targets:
+        return [["python3", "-m", "pytest", "-q", *changed_path_targets]]
     pytest_targets = _extract_pytest_targets(body=body, project_dir=project_dir)
     if pytest_targets:
         return [["python3", "-m", "pytest", "-q", *pytest_targets]]
@@ -128,6 +134,44 @@ def _extract_pytest_targets(*, body: str, project_dir: Path) -> list[str]:
         if absolute_path.exists() and path not in normalized:
             normalized.append(path)
     return normalized
+
+
+def _extract_pytest_targets_from_changed_paths(*, project_dir: Path) -> list[str]:
+    raw = os.environ.get("STARDRIFTER_EXECUTION_CHANGED_PATHS_JSON", "").strip()
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+
+    targets: list[str] = []
+    for item in parsed:
+        if not isinstance(item, str):
+            continue
+        path = item.strip()
+        if not path:
+            continue
+        if path.startswith("tests/") and path.endswith(".py"):
+            candidate = project_dir / path
+            if candidate.exists() and path not in targets:
+                targets.append(path)
+            continue
+        if path.startswith("src/") and path.endswith(".py"):
+            stem = Path(path).stem
+            inferred = [
+                f"tests/unit/test_{stem}.py",
+                f"tests/integration/test_{stem}.py",
+            ]
+            for target in inferred:
+                if target in targets:
+                    continue
+                candidate = project_dir / target
+                if candidate.exists():
+                    targets.append(target)
+    return targets
 
 
 def _extract_candidate_paths(body: str) -> list[str]:

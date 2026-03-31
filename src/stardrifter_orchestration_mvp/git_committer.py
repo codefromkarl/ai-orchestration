@@ -65,28 +65,46 @@ def build_git_committer(
         issue_number = work_item.source_issue_number or _parse_issue_number(
             work_item.id
         )
+        commit_scope = _infer_commit_scope(changed_paths)
         commit_message = (
-            f"chore(task-{issue_number}): complete task #{issue_number}\n\n"
+            f"chore({commit_scope}): complete task #{issue_number}\n\n"
             f"refs #{issue_number}"
         )
         target_repo_root = (
             Path(workspace_path).resolve() if workspace_path is not None else repo_root
         )
 
-        subprocess.run(
-            ["git", "add", "--", *changed_paths],
-            cwd=target_repo_root,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        subprocess.run(
-            ["git", "commit", "--only", "-m", commit_message, "--", *changed_paths],
-            cwd=target_repo_root,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            subprocess.run(
+                ["git", "add", "--", *changed_paths],
+                cwd=target_repo_root,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            return CommitResult(
+                committed=False,
+                blocked_reason="git_add_failed",
+                summary=f"git add failed: {_summarize_git_error(exc)}",
+                commit_message=commit_message,
+            )
+
+        try:
+            subprocess.run(
+                ["git", "commit", "--only", "-m", commit_message, "--", *changed_paths],
+                cwd=target_repo_root,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            return CommitResult(
+                committed=False,
+                blocked_reason="git_commit_failed",
+                summary=f"git commit failed: {_summarize_git_error(exc)}",
+                commit_message=commit_message,
+            )
         commit_sha = subprocess.run(
             ["git", "rev-parse", "HEAD"],
             cwd=target_repo_root,
@@ -255,6 +273,37 @@ def _parse_issue_number(work_id: str) -> int:
     if work_id.startswith("issue-"):
         return int(work_id.split("-", 1)[1])
     raise ValueError(f"cannot infer issue number from work_id: {work_id}")
+
+
+def _infer_commit_scope(changed_paths: list[str]) -> str:
+    normalized_paths = [path.strip() for path in changed_paths if path.strip()]
+    if not normalized_paths:
+        return "core"
+    if all(path.startswith("docs/") for path in normalized_paths):
+        return "docs"
+    if all(path.startswith("tests/") for path in normalized_paths):
+        return "test"
+    if any(path.startswith("src/stardrifter_engine/world") for path in normalized_paths):
+        return "world"
+    if any(path.startswith("src/stardrifter_engine/economy") for path in normalized_paths):
+        return "economy"
+    if any(path.startswith("src/stardrifter_engine/agent") for path in normalized_paths):
+        return "agent"
+    if any(path.startswith("godot/ui/") for path in normalized_paths):
+        return "ui"
+    if any(path.startswith("requirements") or path.endswith("poetry.lock") for path in normalized_paths):
+        return "deps"
+    return "core"
+
+
+def _summarize_git_error(error: subprocess.CalledProcessError) -> str:
+    stdout = (error.stdout or "").strip()
+    stderr = (error.stderr or "").strip()
+    if stderr:
+        return stderr.splitlines()[-1]
+    if stdout:
+        return stdout.splitlines()[-1]
+    return f"exit {error.returncode}"
 
 
 def _select_story_representative(

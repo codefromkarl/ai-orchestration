@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+import json
+import os
 from pathlib import Path
 from typing import Any
 from typing import Callable
@@ -297,12 +299,33 @@ def run_worker_cycle(
             f"TRACE worker stage=before_verifier worker={worker_name} work_id={claimed_work_id}",
             file=sys.stderr,
         )
-        verification = _run_verifier_with_context(
-            verifier=verifier,
-            work_item=repository.get_work_item(claimed_work_id),
-            workspace_path=workspace_path,
-            execution_context=execution_context,
-        )
+        previous_changed_paths = os.environ.get("STARDRIFTER_EXECUTION_CHANGED_PATHS_JSON")
+        changed_paths = []
+        result_payload = execution_result.result_payload_json or {}
+        payload_changed_paths = result_payload.get("changed_paths")
+        if isinstance(payload_changed_paths, list):
+            changed_paths = [
+                path for path in payload_changed_paths if isinstance(path, str) and path.strip()
+            ]
+        if changed_paths:
+            os.environ["STARDRIFTER_EXECUTION_CHANGED_PATHS_JSON"] = json.dumps(
+                changed_paths,
+                ensure_ascii=False,
+            )
+        else:
+            os.environ.pop("STARDRIFTER_EXECUTION_CHANGED_PATHS_JSON", None)
+        try:
+            verification = _run_verifier_with_context(
+                verifier=verifier,
+                work_item=repository.get_work_item(claimed_work_id),
+                workspace_path=workspace_path,
+                execution_context=execution_context,
+            )
+        finally:
+            if previous_changed_paths is None:
+                os.environ.pop("STARDRIFTER_EXECUTION_CHANGED_PATHS_JSON", None)
+            else:
+                os.environ["STARDRIFTER_EXECUTION_CHANGED_PATHS_JSON"] = previous_changed_paths
         print(
             f"TRACE worker stage=after_verifier worker={worker_name} work_id={claimed_work_id} passed={verification.passed}",
             file=sys.stderr,

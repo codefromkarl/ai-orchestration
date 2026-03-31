@@ -65,7 +65,7 @@ def test_git_committer_commits_changed_paths_with_task_number(tmp_path):
         capture_output=True,
         text=True,
     ).stdout
-    assert "task-60" in log
+    assert "chore(core):" in log
     assert "#60" in log
 
 
@@ -120,6 +120,39 @@ def test_git_committer_blocks_when_changed_path_was_already_dirty(tmp_path):
 
     assert result.committed is False
     assert result.blocked_reason == "unsafe_auto_commit_dirty_paths"
+
+
+def test_git_committer_returns_blocked_when_commit_hook_rejects_message(tmp_path):
+    repo = _init_repo(tmp_path)
+    target = repo / "notes.md"
+    target.write_text("v1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "notes.md"], cwd=repo, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True, text=True)
+    commit_msg_hook = repo / ".git" / "hooks" / "commit-msg"
+    commit_msg_hook.write_text("#!/bin/bash\nexit 1\n", encoding="utf-8")
+    commit_msg_hook.chmod(0o755)
+
+    target.write_text("v2\n", encoding="utf-8")
+    committer = build_git_committer(workdir=repo)
+    result = committer(
+        WorkItem(
+            id="issue-61",
+            title="failing hook",
+            lane="Lane 01",
+            wave="unassigned",
+            status="verifying",
+            source_issue_number=61,
+        ),
+        ExecutionResult(
+            success=True,
+            summary="updated docs",
+            result_payload_json={"changed_paths": ["notes.md"], "preexisting_dirty_paths": []},
+        ),
+    )
+
+    assert result.committed is False
+    assert result.blocked_reason == "git_commit_failed"
+    assert result.commit_message is not None
 
 
 def test_git_story_integrator_merges_story_branch_into_main(tmp_path):
