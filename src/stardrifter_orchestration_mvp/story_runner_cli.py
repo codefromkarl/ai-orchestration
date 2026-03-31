@@ -5,7 +5,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from .adapters import build_shell_verifier, build_task_executor
+from .adapters import build_task_executor, build_task_verifier
 from .cli import _default_executor, _default_verifier
 from .factory import build_postgres_repository
 from .git_committer import build_git_committer, build_git_story_integrator
@@ -27,8 +27,8 @@ def main(
     ] = build_task_executor,
     verifier_builder: Callable[
         ..., Callable[[WorkItem], VerificationEvidence]
-    ] = build_shell_verifier,
-    story_verifier_builder: Callable[..., object] = build_shell_verifier,
+    ] = build_task_verifier,
+    story_verifier_builder: Callable[..., object] = build_task_verifier,
     committer_builder: Callable[..., object] = build_git_committer,
     story_integrator_builder: Callable[..., object] = build_git_story_integrator,
 ) -> int:

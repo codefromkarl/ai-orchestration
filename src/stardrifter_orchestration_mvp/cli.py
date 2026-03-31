@@ -5,7 +5,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 import shutil
 
-from .adapters import build_shell_verifier, build_task_executor
+from .adapters import build_task_executor, build_task_verifier
 from .factory import build_postgres_repository
 from .git_committer import build_git_committer
 from .models import ExecutionGuardrailContext, VerificationEvidence, WorkItem
@@ -21,7 +21,7 @@ def main(
     repository_builder: Callable[..., object] = build_postgres_repository,
     cycle_runner: Callable[..., WorkerCycleResult] = run_worker_cycle,
     executor_builder: Callable[..., ExecutorAdapter] = build_task_executor,
-    verifier_builder: Callable[..., VerifierAdapter] = build_shell_verifier,
+    verifier_builder: Callable[..., VerifierAdapter] = build_task_verifier,
     committer_builder: Callable[..., object] = build_git_committer,
 ) -> int:
     args = _build_parser().parse_args(list(argv) if argv is not None else None)
@@ -132,9 +132,9 @@ def _run_cli_preflight(
 ) -> None:
     if not workdir.exists() or not workdir.is_dir():
         raise SystemExit(f"workdir does not exist: {workdir}")
-    if executor_command is not None:
+    if executor_command is not None and not _is_virtual_llm_command(executor_command):
         _require_command_binary(executor_command, label="executor")
-    if verifier_command is not None:
+    if verifier_command is not None and not _is_virtual_llm_command(verifier_command):
         _require_command_binary(verifier_command, label="verifier")
     if worktree_root is not None:
         _validate_worktree_root(worktree_root)
@@ -154,6 +154,10 @@ def _validate_worktree_root(worktree_root: Path) -> None:
                     f"worktree root is not under a writable directory tree: {worktree_root}"
                 )
             return
+
+
+def _is_virtual_llm_command(command: str) -> bool:
+    return command.strip().lower().startswith("llm://")
 
 
 if __name__ == "__main__":

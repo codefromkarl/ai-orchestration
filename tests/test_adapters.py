@@ -9,6 +9,7 @@ from stardrifter_orchestration_mvp.adapters import (
     build_shell_executor,
     build_shell_verifier,
     build_task_executor,
+    build_task_verifier,
 )
 from stardrifter_orchestration_mvp.execution_protocol import EXECUTION_RESULT_MARKER
 from stardrifter_orchestration_mvp.models import ExecutionContext, WorkItem
@@ -427,3 +428,92 @@ def test_task_executor_uses_title_signal_only_when_task_type_metadata_missing(
     executor(work_item)
 
     assert calls == ["controlled"]
+
+
+def test_task_executor_routes_core_path_to_intelligent_when_enabled(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("STARDRIFTER_ENABLE_LLM_EXECUTOR", "1")
+    work_item = WorkItem(
+        id="issue-501",
+        title="[09-IMPL] LLM route",
+        lane="Lane 09",
+        wave="Wave0",
+        status="in_progress",
+        task_type="core_path",
+    )
+    calls: list[str] = []
+
+    def fake_intelligent_builder(*, command_template: str, workdir: Path):
+        assert command_template == "echo shell"
+        assert workdir == tmp_path
+
+        def _executor(*args, **kwargs):
+            del args, kwargs
+            calls.append("intelligent")
+            return cast(Any, object())
+
+        return _executor
+
+    def fake_controlled_builder(*, workdir: Path):
+        assert workdir == tmp_path
+
+        def _executor(*args, **kwargs):
+            del args, kwargs
+            calls.append("controlled")
+            return cast(Any, object())
+
+        return _executor
+
+    monkeypatch.setattr(
+        "stardrifter_orchestration_mvp.adapters.build_intelligent_executor",
+        fake_intelligent_builder,
+    )
+    monkeypatch.setattr(
+        "stardrifter_orchestration_mvp.adapters.build_controlled_executor",
+        fake_controlled_builder,
+    )
+
+    executor = build_task_executor(command_template="echo shell", workdir=tmp_path)
+    executor(work_item)
+
+    assert calls == ["intelligent"]
+
+
+def test_task_verifier_routes_to_llm_verifier_when_enabled(monkeypatch, tmp_path):
+    monkeypatch.setenv("STARDRIFTER_ENABLE_LLM_VERIFIER", "true")
+    calls: list[str] = []
+
+    def fake_adaptive_builder(*, command_template: str, workdir: Path, check_type: str):
+        assert command_template == "pytest -q"
+        assert workdir == tmp_path
+        assert check_type == "pytest"
+
+        def _verifier(*args, **kwargs):
+            del args, kwargs
+            calls.append("llm")
+            return cast(Any, object())
+
+        return _verifier
+
+    monkeypatch.setattr(
+        "stardrifter_orchestration_mvp.adapters.build_adaptive_verifier",
+        fake_adaptive_builder,
+    )
+
+    verifier = build_task_verifier(
+        command_template="pytest -q",
+        workdir=tmp_path,
+        check_type="pytest",
+    )
+    verifier(
+        WorkItem(
+            id="task-v",
+            title="verify",
+            lane="Lane 06",
+            wave="wave-5",
+            status="verifying",
+        )
+    )
+
+    assert calls == ["llm"]

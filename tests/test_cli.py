@@ -195,6 +195,30 @@ def test_cli_main_rejects_missing_verifier_command_binary(monkeypatch, tmp_path)
     )
 
 
+def test_cli_main_accepts_virtual_llm_commands_without_binary_lookup(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv(
+        "STARDRIFTER_ORCHESTRATION_DSN",
+        "postgresql://user:pass@localhost:5432/stardrifter",
+    )
+
+    exit_code = main(
+        [
+            "--workdir",
+            str(tmp_path),
+            "--executor-command",
+            "llm://executor",
+            "--verifier-command",
+            "llm://verifier",
+        ],
+        repository_builder=lambda *, dsn: object(),
+        cycle_runner=lambda **kwargs: WorkerCycleResult(claimed_work_id=None),
+    )
+
+    assert exit_code == 0
+
+
 def test_cli_main_rejects_nonexistent_workdir(monkeypatch, tmp_path):
     monkeypatch.setenv(
         "STARDRIFTER_ORCHESTRATION_DSN",

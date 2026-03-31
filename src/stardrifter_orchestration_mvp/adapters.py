@@ -10,6 +10,12 @@ import threading
 import time
 from typing import Callable
 
+from .intelligent_executor import (
+    build_adaptive_verifier,
+    build_intelligent_executor,
+    llm_executor_enabled,
+    llm_verifier_enabled,
+)
 from .models import ExecutionContext, VerificationEvidence, WorkItem
 from .execution_protocol import EXECUTION_RESULT_MARKER
 from .protocols import ExecutorAdapter, VerifierAdapter
@@ -90,6 +96,25 @@ def build_shell_verifier(
     return _verifier
 
 
+def build_task_verifier(
+    *,
+    command_template: str,
+    workdir: Path,
+    check_type: str,
+) -> VerifierAdapter:
+    if llm_verifier_enabled(command_template=command_template):
+        return build_adaptive_verifier(
+            command_template=command_template,
+            workdir=workdir,
+            check_type=check_type,
+        )
+    return build_shell_verifier(
+        command_template=command_template,
+        workdir=workdir,
+        check_type=check_type,
+    )
+
+
 def build_controlled_executor(*, workdir: Path) -> ExecutorAdapter:
     def _executor(
         work_item: WorkItem,
@@ -152,6 +177,12 @@ def build_task_executor(
         workdir=workdir,
     )
     controlled_executor = build_controlled_executor(workdir=workdir)
+    intelligent_executor: ExecutorAdapter | None = None
+    if llm_executor_enabled(command_template=command_template):
+        intelligent_executor = build_intelligent_executor(
+            command_template=command_template,
+            workdir=workdir,
+        )
 
     def _executor(
         work_item: WorkItem,
@@ -159,6 +190,16 @@ def build_task_executor(
         execution_context: ExecutionContext | None = None,
         heartbeat: Callable[[], None] | None = None,
     ) -> ExecutionResult:
+        if intelligent_executor is not None and _should_use_controlled_executor(
+            work_item=work_item,
+            execution_context=execution_context,
+        ):
+            return intelligent_executor(
+                work_item,
+                workspace_path=workspace_path,
+                execution_context=execution_context,
+                heartbeat=heartbeat,
+            )
         if _should_use_controlled_executor(
             work_item=work_item,
             execution_context=execution_context,
@@ -292,6 +333,11 @@ def _load_required_env(name: str) -> str:
 def _should_use_controlled_executor(
     *, work_item: WorkItem, execution_context: ExecutionContext | None
 ) -> bool:
+    force_shell_executor = os.environ.get(
+        "STARDRIFTER_FORCE_SHELL_EXECUTOR", ""
+    ).strip().lower() in {"1", "true", "yes"}
+    if force_shell_executor:
+        return False
     if work_item.task_type:
         return work_item.task_type == "core_path"
     return _is_implementation_title(work_item.title)
