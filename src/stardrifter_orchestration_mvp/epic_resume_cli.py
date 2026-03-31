@@ -401,8 +401,13 @@ def _is_continue_ready(
     refreshed_state: EpicExecutionState,
     open_request_count: int,
 ) -> bool:
-    del previous_state, refreshed_state, open_request_count
-    return False
+    if previous_state is None:
+        return False
+    if open_request_count != 0:
+        return False
+    if previous_state.status != "awaiting_operator":
+        return False
+    return refreshed_state.status == "active"
 
 
 def _format_refresh_result(*, mode: str, result: EpicRefreshResult) -> str:

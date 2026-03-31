@@ -103,7 +103,7 @@ def test_operator_request_ack_cli_closes_operator_request(monkeypatch, capsys):
     }
     assert capsys.readouterr().out == (
         "closed operator request epic=13 reason=progress_timeout status=closed closed_reason=acknowledged\n"
-        "mode=apply epic=13 status=awaiting_operator operator_attention=false open_requests=0 continue_ready=false\n"
+        "mode=apply epic=13 status=backlog operator_attention=false open_requests=0 continue_ready=false\n"
     )
 
 
@@ -271,5 +271,5 @@ def test_operator_request_ack_cli_refreshes_epic_runtime_after_closing_last_open
     assert exit_code == 0
     assert capsys.readouterr().out.strip().splitlines() == [
         "closed operator request epic=13 reason=all_remaining_stories_blocked status=closed closed_reason=resolved_in_governance",
-        "mode=apply epic=13 status=awaiting_operator operator_attention=false open_requests=0 continue_ready=true",
+        "mode=apply epic=13 status=active operator_attention=false open_requests=0 continue_ready=true",
     ]

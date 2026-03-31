@@ -340,7 +340,7 @@ def test_epic_resume_cli_recomputes_active_state_when_runtime_is_cleaner_for_sup
     assert exit_code == 0
     assert (
         capsys.readouterr().out.strip()
-        == "mode=apply epic=13 status=active operator_attention=false open_requests=0 continue_ready=false"
+        == "mode=apply epic=13 status=active operator_attention=false open_requests=0 continue_ready=true"
     )
 
 
@@ -418,7 +418,7 @@ def test_epic_resume_cli_recomputes_status_from_current_story_runtime_instead_of
     )
     assert (
         capsys.readouterr().out.strip()
-        == "mode=apply epic=13 status=active operator_attention=false open_requests=0 continue_ready=false"
+        == "mode=apply epic=13 status=active operator_attention=false open_requests=0 continue_ready=true"
     )
 
 
