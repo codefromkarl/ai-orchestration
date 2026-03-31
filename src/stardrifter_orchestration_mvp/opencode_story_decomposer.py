@@ -187,14 +187,15 @@ def _build_prompt(*, repo: str, row: dict, project_dir: Path) -> str:
         "5. 所有 Task 方案必须能直接映射到合法 Task issue：标题、复杂度、目标、允许修改路径、DoD、验证方式、参考都要给出。\n"
         "6. 至少创建一个挂在当前 Story 下的合法 Task；如果做不到，必须返回 needs_story_refinement 或 blocked，不得返回 decomposed。\n"
         "7. Story 正文里的 `Candidate Tasks` 编号只可当历史线索，不能当成当前已存在任务；是否已有任务只以“当前已投影 task 数”为准。如果当前已投影 task 数为 0，你必须创建新的 Task，或返回 needs_story_refinement / blocked。\n"
-        "8. 你可以输出两种 JSON：\n"
+        "8. 验证方式（verification）必须用自然语言描述验证目标，禁止写具体的 pytest 命令（如 `python3 -m pytest -q tests/unit/`）。正确示例：'确认 CSV 解析容错功能通过 focused 单测'。验证器会根据变更的文件自动推断要跑的测试。\n"
+        "9. 你可以输出两种 JSON：\n"
         "   - 终态 JSON（terminal）：outcome 为 decomposed/needs_story_refinement/blocked，附带 task 列表\n"
         '     格式: {"outcome":"decomposed|needs_story_refinement|blocked","summary":"...","reason_code":"...","tasks":[...]}\n'
         "   - 检查点 JSON（checkpoint）：用于分步完成时暂存进度\n"
         '     格式: {"execution_kind":"checkpoint","phase":"researching","summary":"...","artifacts":{},"next_action_hint":"继续生成 task"}\n'
         "   - 等待 JSON（wait）：当需要等待外部条件或子结果时使用\n"
         '     格式: {"execution_kind":"wait","wait_type":"subagent_result","summary":"...","resume_hint":"..."}\n'
-        "9. 最终只输出一个 JSON 对象，不要输出 Markdown 代码块。\n"
+        "10. 最终只输出一个 JSON 对象，不要输出 Markdown 代码块。\n"
         'JSON 格式必须是 {"outcome":"decomposed|needs_story_refinement|blocked","summary":"...","reason_code":"...","tasks":[{"title":"[01-IMPL] ...","complexity":"low|medium|high","goal":"...","allowed_paths":["..."],"dod":["..."],"verification":["..."],"references":["..."]}]}。\n\n'
         f"Story 正文如下：\n{body}\n"
     )
