@@ -510,18 +510,11 @@ class InMemoryControlPlaneRepository:
         commit_link: dict[str, Any] | None = None,
         pull_request_link: dict[str, Any] | None = None,
     ) -> None:
-        effective_status = status
-        effective_blocked_reason = blocked_reason
-        effective_decision_required = decision_required
-        if status == "blocked" and self._has_successful_terminal_run(work_id):
-            effective_status = "done"
-            effective_blocked_reason = None
-            effective_decision_required = False
         self.update_work_status(
             work_id,
-            effective_status,
-            blocked_reason=effective_blocked_reason,
-            decision_required=effective_decision_required,
+            status,
+            blocked_reason=blocked_reason,
+            decision_required=decision_required,
             attempt_count=attempt_count,
             last_failure_reason=last_failure_reason,
             next_eligible_at=next_eligible_at,

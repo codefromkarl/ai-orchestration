@@ -157,6 +157,66 @@ def test_story_runner_cli_builds_shell_adapters_when_commands_are_provided(
     assert captured["story_integrator"] is None
 
 
+def test_story_runner_cli_uses_task_verifier_by_default(monkeypatch, tmp_path):
+    monkeypatch.setenv(
+        "STARDRIFTER_ORCHESTRATION_DSN",
+        "postgresql://user:pass@localhost:5432/stardrifter",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_verifier_builder(*, command_template: str, workdir, check_type: str):
+        captured["verifier_command"] = command_template
+        captured["verifier_workdir"] = workdir
+        captured["verifier_check_type"] = check_type
+        return "verifier"
+
+    def fake_story_runner(
+        *,
+        story_issue_number: int,
+        story_work_item_ids,
+        repository,
+        context,
+        worker_name: str,
+        executor,
+        verifier,
+        story_verifier=None,
+        committer,
+        story_integrator=None,
+        workspace_manager=None,
+    ):
+        captured["verifier"] = verifier
+        return StoryRunResult(
+            story_issue_number=story_issue_number,
+            completed_work_item_ids=[],
+            blocked_work_item_ids=[],
+            remaining_work_item_ids=["issue-56"],
+            story_complete=False,
+        )
+
+    exit_code = main(
+        [
+            "--story-issue-number",
+            "29",
+            "--workdir",
+            str(tmp_path),
+        ],
+        repository_builder=lambda *, dsn: object(),
+        story_loader=lambda **kwargs: ["issue-56"],
+        story_runner=fake_story_runner,
+        verifier_builder=fake_verifier_builder,
+        committer_builder=lambda *, workdir: "committer",
+    )
+
+    assert exit_code == 0
+    assert (
+        captured["verifier_command"]
+        == "python3 -m stardrifter_orchestration_mvp.task_verifier"
+    )
+    assert captured["verifier_workdir"] == tmp_path
+    assert captured["verifier_check_type"] == "pytest"
+    assert captured["verifier"] == "verifier"
+
+
 def test_story_runner_cli_builds_story_verifier_when_command_is_provided(
     monkeypatch, tmp_path
 ):

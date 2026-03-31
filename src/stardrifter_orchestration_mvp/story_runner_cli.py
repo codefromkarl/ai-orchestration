@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .adapters import build_task_executor, build_task_verifier
-from .cli import _default_executor, _default_verifier
+from .cli import DEFAULT_VERIFIER_COMMAND, _default_executor
 from .factory import build_postgres_repository
 from .git_committer import build_git_committer, build_git_story_integrator
 from .models import ExecutionGuardrailContext, VerificationEvidence, WorkItem
@@ -52,13 +52,12 @@ def main(
             command_template=args.executor_command,
             workdir=workdir,
         )
-    verifier = _default_verifier
-    if args.verifier_command:
-        verifier = verifier_builder(
-            command_template=args.verifier_command,
-            workdir=workdir,
-            check_type=args.verifier_check_type,
-        )
+    verifier_command = args.verifier_command or DEFAULT_VERIFIER_COMMAND
+    verifier = verifier_builder(
+        command_template=verifier_command,
+        workdir=workdir,
+        check_type=args.verifier_check_type,
+    )
     committer = committer_builder(workdir=workdir)
     story_verifier = None
     if args.story_verifier_command:

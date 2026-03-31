@@ -1404,17 +1404,11 @@ class PostgresControlPlaneRepository:
         commit_link: dict[str, Any] | None = None,
         pull_request_link: dict[str, Any] | None = None,
     ) -> None:
-        preserve_done = status == "blocked" and self._has_successful_terminal_run(
-            work_id
-        )
-        effective_status = "done" if preserve_done else status
-        effective_blocked_reason = None if preserve_done else blocked_reason
-        effective_decision_required = False if preserve_done else decision_required
         self.update_work_status(
             work_id,
-            effective_status,
-            blocked_reason=effective_blocked_reason,
-            decision_required=effective_decision_required,
+            status,
+            blocked_reason=blocked_reason,
+            decision_required=decision_required,
             attempt_count=attempt_count,
             last_failure_reason=last_failure_reason,
             next_eligible_at=next_eligible_at,

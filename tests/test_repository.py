@@ -416,7 +416,7 @@ def test_in_memory_repository_claim_ready_work_item_skips_task_with_successful_d
     assert repository.work_items_by_id["issue-82"].status == "ready"
 
 
-def test_in_memory_repository_finalize_work_attempt_preserves_done_over_later_blocked():
+def test_in_memory_repository_finalize_work_attempt_allows_later_blocked_result():
     repository = InMemoryControlPlaneRepository(
         work_items=[
             WorkItem(
@@ -451,8 +451,8 @@ def test_in_memory_repository_finalize_work_attempt_preserves_done_over_later_bl
         ),
     )
 
-    assert repository.work_items_by_id["issue-82"].status == "done"
-    assert repository.work_items_by_id["issue-82"].blocked_reason is None
+    assert repository.work_items_by_id["issue-82"].status == "blocked"
+    assert repository.work_items_by_id["issue-82"].blocked_reason == "invalid-result-payload"
 
 
 def test_in_memory_repository_lists_only_active_work_claims():

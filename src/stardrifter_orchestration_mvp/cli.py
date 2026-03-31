@@ -14,6 +14,8 @@ from .settings import load_postgres_settings_from_env
 from .worker import ExecutionResult, WorkerCycleResult, run_worker_cycle
 from .workspace import WorkspaceManager
 
+DEFAULT_VERIFIER_COMMAND = "python3 -m stardrifter_orchestration_mvp.task_verifier"
+
 
 def main(
     argv: Sequence[str] | None = None,
@@ -28,10 +30,11 @@ def main(
     settings = load_postgres_settings_from_env()
     frozen_prefixes = tuple(args.frozen_prefix) or ("docs/authority/",)
     workdir = Path(args.workdir).resolve()
+    verifier_command = args.verifier_command or DEFAULT_VERIFIER_COMMAND
     _run_cli_preflight(
         workdir=workdir,
         executor_command=args.executor_command,
-        verifier_command=args.verifier_command,
+        verifier_command=verifier_command,
         worktree_root=Path(args.worktree_root).resolve()
         if args.worktree_root
         else None,
@@ -47,13 +50,11 @@ def main(
             command_template=args.executor_command,
             workdir=workdir,
         )
-    verifier = _default_verifier
-    if args.verifier_command:
-        verifier = verifier_builder(
-            command_template=args.verifier_command,
-            workdir=workdir,
-            check_type=args.verifier_check_type,
-        )
+    verifier = verifier_builder(
+        command_template=verifier_command,
+        workdir=workdir,
+        check_type=args.verifier_check_type,
+    )
     committer = committer_builder(workdir=workdir)
     workspace_manager = None
     if args.worktree_root:

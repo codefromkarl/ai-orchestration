@@ -46,7 +46,6 @@ from .repository import ControlPlaneRepository
 from .workspace import build_workspace_spec
 
 ALREADY_SATISFIED_OUTCOME = "already_satisfied"
-NON_BLOCKING_COMMIT_REASONS = {"unsafe_auto_commit_dirty_paths"}
 
 
 REQUEUEABLE_BACKOFF = timedelta(minutes=5)  # 保留向后兼容
@@ -238,6 +237,35 @@ def run_worker_cycle(
 
         outcome = _extract_outcome(execution_result)
         if outcome == ALREADY_SATISFIED_OUTCOME:
+            existing_commit_link = repository.get_commit_link(claimed_work_id)
+            if existing_commit_link is None:
+                repository.finalize_work_attempt(
+                    work_id=claimed_work_id,
+                    status="blocked",
+                    blocked_reason="already_satisfied_without_commit_evidence",
+                    decision_required=True,
+                    execution_run=ExecutionRun(
+                        work_id=claimed_work_id,
+                        worker_name=worker_name,
+                        status="blocked",
+                        branch_name=claim_branch_name_by_work_id.get(claimed_work_id),
+                        command_digest=execution_result.command_digest,
+                        summary=execution_result.summary,
+                        exit_code=execution_result.exit_code,
+                        elapsed_ms=execution_result.elapsed_ms,
+                        stdout_digest=execution_result.stdout_digest,
+                        stderr_digest=execution_result.stderr_digest,
+                        result_payload_json=execution_result.result_payload_json,
+                    ),
+                )
+                _write_back_task_issue_status(
+                    repository=repository,
+                    work_id=claimed_work_id,
+                    status="blocked",
+                    decision_required=True,
+                    github_writeback=github_writeback,
+                )
+                return WorkerCycleResult(claimed_work_id=claimed_work_id)
             repository.finalize_work_attempt(
                 work_id=claimed_work_id,
                 status="done",
@@ -294,12 +322,11 @@ def run_worker_cycle(
                     workspace_path,
                 )
                 if commit_result.blocked_reason:
-                    if commit_result.blocked_reason in NON_BLOCKING_COMMIT_REASONS:
-                        final_status = "done"
-                        blocked_reason = None
-                    else:
-                        final_status = "blocked"
-                        blocked_reason = commit_result.blocked_reason
+                    final_status = "blocked"
+                    blocked_reason = commit_result.blocked_reason
+                elif not commit_result.committed:
+                    final_status = "blocked"
+                    blocked_reason = "missing_commit_evidence"
         result_payload_json = dict(execution_result.result_payload_json or {})
         approval_required = bool(result_payload_json.get("decision_required")) or (
             _extract_outcome(execution_result) == "needs_decision"

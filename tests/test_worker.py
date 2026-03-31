@@ -1577,9 +1577,12 @@ def test_run_worker_cycle_blocks_when_auto_commit_is_unsafe():
     )
 
     assert result.claimed_work_id == "task-5"
-    assert repository.work_items_by_id["task-5"].status == "done"
-    assert repository.work_items_by_id["task-5"].blocked_reason is None
-    assert repository.execution_runs[0].status == "done"
+    assert repository.work_items_by_id["task-5"].status == "blocked"
+    assert (
+        repository.work_items_by_id["task-5"].blocked_reason
+        == "unsafe_auto_commit_dirty_paths"
+    )
+    assert repository.execution_runs[0].status == "blocked"
     assert repository.execution_runs[0].result_payload_json is not None
     assert (
         repository.execution_runs[0].result_payload_json["commit"]["blocked_reason"]
@@ -1855,7 +1858,7 @@ def test_run_worker_cycle_syncs_blocked_needs_decision_to_github():
     ]
 
 
-def test_run_worker_cycle_marks_already_satisfied_done_without_verification_or_commit():
+def test_run_worker_cycle_blocks_already_satisfied_without_commit_evidence():
     repository = InMemoryControlPlaneRepository(
         work_items=[
             WorkItem(
@@ -1909,17 +1912,150 @@ def test_run_worker_cycle_marks_already_satisfied_done_without_verification_or_c
     )
 
     assert result.claimed_work_id == "task-6"
-    assert repository.work_items_by_id["task-6"].status == "done"
-    assert repository.work_items_by_id["task-6"].blocked_reason is None
+    assert repository.work_items_by_id["task-6"].status == "blocked"
+    assert (
+        repository.work_items_by_id["task-6"].blocked_reason
+        == "already_satisfied_without_commit_evidence"
+    )
+    assert repository.work_items_by_id["task-6"].decision_required is True
     assert verifier_calls == []
     assert commit_calls == []
-    assert repository.execution_runs[0].status == "done"
+    assert repository.execution_runs[0].status == "blocked"
     assert repository.execution_runs[0].result_payload_json == {
         "outcome": "already_satisfied",
         "reason_code": "already_has_backend_skeleton",
         "changed_paths": [],
     }
     assert repository.verification_evidence == []
+
+
+def test_run_worker_cycle_allows_already_satisfied_with_existing_commit_evidence():
+    repository = InMemoryControlPlaneRepository(
+        work_items=[
+            WorkItem(
+                id="task-6b",
+                title="already satisfied with proof",
+                lane="Lane 02",
+                wave="wave-2",
+                status="pending",
+                repo="codefromkarl/stardrifter",
+                source_issue_number=6,
+            ),
+        ],
+        dependencies=[],
+        targets_by_work_id={
+            "task-6b": [
+                WorkTarget(
+                    work_id="task-6b",
+                    target_path="src/stardrifter_engine/campaign/runtime.py",
+                    target_type="file",
+                    owner_lane="Lane 02",
+                    is_frozen=False,
+                    requires_human_approval=False,
+                )
+            ]
+        },
+    )
+    repository.record_commit_link(
+        work_id="task-6b",
+        repo="codefromkarl/stardrifter",
+        issue_number=6,
+        commit_sha="abc123",
+        commit_message="chore(task-6): complete task #6",
+    )
+    context = ExecutionGuardrailContext(
+        allowed_waves={"wave-2"},
+        frozen_prefixes=("docs/authority/",),
+    )
+
+    result = run_worker_cycle(
+        repository=repository,
+        context=context,
+        worker_name="worker-a",
+        executor=lambda work_item, workspace_path=None: ExecutionResult(
+            success=True,
+            summary="already there",
+            result_payload_json={
+                "outcome": "already_satisfied",
+                "reason_code": "already_has_backend_skeleton",
+                "changed_paths": [],
+            },
+        ),
+        verifier=lambda work_item, workspace_path=None: (_ for _ in ()).throw(
+            AssertionError("verifier should not run for already_satisfied")
+        ),
+    )
+
+    assert result.claimed_work_id == "task-6b"
+    assert repository.work_items_by_id["task-6b"].status == "done"
+    assert repository.work_items_by_id["task-6b"].blocked_reason is None
+    assert repository.execution_runs[0].status == "done"
+
+
+def test_run_worker_cycle_blocks_when_committer_returns_uncommitted_without_reason():
+    repository = InMemoryControlPlaneRepository(
+        work_items=[
+            WorkItem(
+                id="task-6c",
+                title="missing commit evidence",
+                lane="Lane 02",
+                wave="wave-2",
+                status="pending",
+            ),
+        ],
+        dependencies=[],
+        targets_by_work_id={
+            "task-6c": [
+                WorkTarget(
+                    work_id="task-6c",
+                    target_path="src/stardrifter_engine/campaign/runtime.py",
+                    target_type="file",
+                    owner_lane="Lane 02",
+                    is_frozen=False,
+                    requires_human_approval=False,
+                )
+            ]
+        },
+    )
+    context = ExecutionGuardrailContext(
+        allowed_waves={"wave-2"},
+        frozen_prefixes=("docs/authority/",),
+    )
+
+    result = run_worker_cycle(
+        repository=repository,
+        context=context,
+        worker_name="worker-a",
+        executor=lambda work_item, workspace_path=None: ExecutionResult(
+            success=True,
+            summary="claimed done but no commit",
+            result_payload_json={
+                "outcome": "done",
+                "changed_paths": ["src/stardrifter_engine/campaign/runtime.py"],
+            },
+        ),
+        verifier=lambda work_item, workspace_path=None: VerificationEvidence(
+            work_id=work_item.id,
+            check_type="pytest",
+            command="python3 -m pytest -q",
+            passed=True,
+            output_digest="ok",
+        ),
+        committer=lambda work_item, execution_result, workspace_path=None: CommitResult(
+            committed=False,
+            commit_sha=None,
+            blocked_reason=None,
+            summary="no commit produced",
+            commit_message=None,
+        ),
+    )
+
+    assert result.claimed_work_id == "task-6c"
+    assert repository.work_items_by_id["task-6c"].status == "blocked"
+    assert (
+        repository.work_items_by_id["task-6c"].blocked_reason
+        == "missing_commit_evidence"
+    )
 
 
 def test_run_worker_cycle_creates_and_releases_work_claim_with_workspace_path(tmp_path):

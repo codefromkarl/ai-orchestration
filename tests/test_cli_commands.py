@@ -90,6 +90,59 @@ def test_cli_main_builds_shell_adapters_when_commands_are_provided(
     assert captured["verifier_check_type"] == "pytest"
 
 
+def test_cli_main_uses_task_verifier_by_default(monkeypatch, tmp_path):
+    monkeypatch.setenv(
+        "STARDRIFTER_ORCHESTRATION_DSN",
+        "postgresql://user:pass@localhost:5432/stardrifter",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_repository_builder(*, dsn: str):
+        return object()
+
+    def fake_verifier_builder(*, command_template: str, workdir: Path, check_type: str):
+        captured["verifier_command"] = command_template
+        captured["verifier_workdir"] = workdir
+        captured["verifier_check_type"] = check_type
+        return _fake_verifier
+
+    def fake_committer_builder(*, workdir: Path):
+        return object()
+
+    def fake_cycle_runner(
+        *,
+        repository,
+        context: ExecutionGuardrailContext,
+        worker_name: str,
+        executor,
+        verifier,
+        committer,
+        work_item_ids=None,
+        workspace_manager=None,
+    ):
+        captured["verifier"] = verifier
+        return WorkerCycleResult(claimed_work_id=None)
+
+    exit_code = main(
+        [
+            "--workdir",
+            str(tmp_path),
+        ],
+        repository_builder=fake_repository_builder,
+        cycle_runner=fake_cycle_runner,
+        verifier_builder=fake_verifier_builder,
+        committer_builder=fake_committer_builder,
+    )
+
+    assert exit_code == 0
+    assert (
+        captured["verifier_command"]
+        == "python3 -m stardrifter_orchestration_mvp.task_verifier"
+    )
+    assert captured["verifier_workdir"] == tmp_path
+    assert captured["verifier_check_type"] == "pytest"
+
+
 def test_story_runner_cli_builds_routed_task_executor_when_command_is_provided(
     monkeypatch, tmp_path
 ):
