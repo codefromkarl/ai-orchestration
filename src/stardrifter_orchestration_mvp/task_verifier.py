@@ -83,14 +83,25 @@ def _resolve_verification_commands(
 ) -> list[list[str]]:
     if "-DOC]" in title or title.startswith("[PROCESS]"):
         return []
-    explicit_commands = _extract_explicit_commands(body)
-    if explicit_commands:
-        return explicit_commands
+
+    # Try dynamic test inference first (highest priority)
     changed_path_targets = _extract_pytest_targets_from_changed_paths(
         project_dir=project_dir
     )
     if changed_path_targets:
         return [["python3", "-m", "pytest", "-q", *changed_path_targets]]
+
+    # Try explicit commands, but skip directory-level pytest commands
+    # (e.g., `pytest tests/unit/`) which are too broad
+    explicit_commands = _extract_explicit_commands(body)
+    if explicit_commands:
+        # Filter out directory-level pytest commands (those ending with /)
+        file_level_commands = [
+            cmd for cmd in explicit_commands if not _is_directory_level_pytest(cmd)
+        ]
+        if file_level_commands:
+            return file_level_commands
+
     pytest_targets = _extract_pytest_targets(body=body, project_dir=project_dir)
     if pytest_targets:
         return [["python3", "-m", "pytest", "-q", *pytest_targets]]
@@ -120,6 +131,16 @@ def _extract_explicit_commands(body: str) -> list[list[str]]:
             continue
         commands.append(stripped.split())
     return commands
+
+
+def _is_directory_level_pytest(command: list[str]) -> bool:
+    """Check if a pytest command targets a directory (e.g., tests/unit/) rather than specific files."""
+    for token in command:
+        if token == "pytest" or token.startswith("-"):
+            continue
+        if token.endswith("/") and ("tests/" in token or "test_" in token):
+            return True
+    return False
 
 
 def _extract_pytest_targets(*, body: str, project_dir: Path) -> list[str]:
