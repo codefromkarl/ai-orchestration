@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from stardrifter_orchestration_mvp.executor_adapter import parse_executor_output
-from stardrifter_orchestration_mvp.execution_protocol import (
+from taskplane.executor_adapter import parse_executor_output
+from taskplane.execution_protocol import (
     EXECUTION_CHECKPOINT_MARKER,
     EXECUTION_RESULT_MARKER,
     EXECUTION_WAIT_MARKER,
@@ -11,14 +11,14 @@ from stardrifter_orchestration_mvp.execution_protocol import (
     validate_checkpoint_payload,
     validate_wait_payload,
 )
-from stardrifter_orchestration_mvp.policy_engine import evaluate_policy
-from stardrifter_orchestration_mvp.session_manager import InMemorySessionManager
-from stardrifter_orchestration_mvp.session_runtime_loop import (
+from taskplane.policy_engine import evaluate_policy
+from taskplane.session_manager import InMemorySessionManager
+from taskplane.session_runtime_loop import (
     ExecutorResult,
     run_session_iteration,
     run_session_to_completion,
 )
-from stardrifter_orchestration_mvp.wakeup_dispatcher import InMemoryWakeupDispatcher
+from taskplane.wakeup_dispatcher import InMemoryWakeupDispatcher
 
 
 class TestSessionManagerBoundaries:
@@ -298,7 +298,7 @@ class TestRuntimeLoopBoundaries:
 
 class TestPolicyEngineBoundaries:
     def test_attempt_index_exact_threshold(self) -> None:
-        from stardrifter_orchestration_mvp.models import ExecutionSession
+        from taskplane.models import ExecutionSession
 
         session = ExecutionSession(id="s1", work_id="w1", current_phase="planning")
         res = evaluate_policy(
@@ -310,7 +310,7 @@ class TestPolicyEngineBoundaries:
         assert res.resolution == "human_required"
 
     def test_attempt_index_one_below_threshold(self) -> None:
-        from stardrifter_orchestration_mvp.models import ExecutionSession
+        from taskplane.models import ExecutionSession
 
         session = ExecutionSession(id="s1", work_id="w1", current_phase="planning")
         res = evaluate_policy(
@@ -322,7 +322,7 @@ class TestPolicyEngineBoundaries:
         assert res.resolution == "retry_strategy"
 
     def test_timeout_exact_threshold(self) -> None:
-        from stardrifter_orchestration_mvp.models import ExecutionSession
+        from taskplane.models import ExecutionSession
 
         session = ExecutionSession(id="s1", work_id="w1", current_phase="planning")
         res = evaluate_policy(
@@ -334,7 +334,7 @@ class TestPolicyEngineBoundaries:
         assert res.resolution == "human_required"
 
     def test_timeout_one_below_threshold(self) -> None:
-        from stardrifter_orchestration_mvp.models import ExecutionSession
+        from taskplane.models import ExecutionSession
 
         session = ExecutionSession(id="s1", work_id="w1", current_phase="planning")
         res = evaluate_policy(
@@ -346,7 +346,7 @@ class TestPolicyEngineBoundaries:
         assert res.resolution == "retry_strategy"
 
     def test_empty_failure_context(self) -> None:
-        from stardrifter_orchestration_mvp.models import ExecutionSession
+        from taskplane.models import ExecutionSession
 
         session = ExecutionSession(id="s1", work_id="w1", current_phase="planning")
         res = evaluate_policy(
@@ -358,7 +358,7 @@ class TestPolicyEngineBoundaries:
         assert res.resolution == "retry_strategy"
 
     def test_security_keyword_forces_human(self) -> None:
-        from stardrifter_orchestration_mvp.models import ExecutionSession
+        from taskplane.models import ExecutionSession
 
         session = ExecutionSession(id="s1", work_id="w1", current_phase="planning")
         res = evaluate_policy(
@@ -388,7 +388,7 @@ class TestExecutorAdapterBoundaries:
         assert result.payload["outcome"] == "done"
 
     def test_partial_marker_prefix_no_match(self) -> None:
-        raw = "STARDRIFTER_EXECUTION_RESULT_JSON incomplete"
+        raw = "TASKPLANE_EXECUTION_RESULT_JSON incomplete"
         result = parse_executor_output(raw, "", 0)
         assert result.success is False
 
