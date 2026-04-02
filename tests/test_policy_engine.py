@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from stardrifter_orchestration_mvp.policy_engine import (
+from taskplane.policy_engine import (
     PolicyResolution,
     evaluate_policy,
 )
-from stardrifter_orchestration_mvp.session_manager import InMemorySessionManager
+from taskplane.session_manager import InMemorySessionManager
 
 
 def _make_session_with_context(**kwargs):
@@ -105,3 +105,42 @@ class TestEvaluatePolicy:
             attempt_index=5,
         )
         assert res.resolution == "human_required"
+
+    def test_guardrail_reason_code_requires_human_review(self) -> None:
+        session, _ = _make_session_with_context()
+        res = evaluate_policy(
+            session=session,
+            checkpoint=None,
+            failure_context={"reason_code": "human-approval-required"},
+            attempt_index=1,
+        )
+        assert res.resolution == "human_required"
+        assert res.detail == {"reason_class": "guardrail_hard_stop"}
+
+    def test_workspace_conflict_prefers_retry_after_clean(self) -> None:
+        session, _ = _make_session_with_context()
+        res = evaluate_policy(
+            session=session,
+            checkpoint=None,
+            failure_context={"reason_code": "path-conflict:src/foo.py"},
+            attempt_index=1,
+        )
+        assert res.resolution == "auto_resolve"
+        assert res.detail == {
+            "reason_class": "workspace_conflict",
+            "matched_prefix": "path-conflict:",
+        }
+
+    def test_interrupted_retryable_prefers_retry_fresh(self) -> None:
+        session, _ = _make_session_with_context()
+        res = evaluate_policy(
+            session=session,
+            checkpoint=None,
+            failure_context={"reason_code": "interrupted_retryable"},
+            attempt_index=1,
+        )
+        assert res.resolution == "retry_strategy"
+        assert res.detail == {
+            "reason_class": "transient_executor_failure",
+            "strategy": "retry_fresh",
+        }

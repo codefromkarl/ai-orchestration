@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from stardrifter_orchestration_mvp.session_manager import InMemorySessionManager
+from taskplane.session_manager import InMemorySessionManager
 
 
 class TestInMemorySessionManager:
