@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from stardrifter_orchestration_mvp.execution_protocol import (
+from taskplane.execution_protocol import (
     EXECUTION_CHECKPOINT_MARKER,
     EXECUTION_RESULT_MARKER,
     EXECUTION_RETRY_INTENT_MARKER,
@@ -186,7 +186,7 @@ class TestFormatMarkers:
 
 class TestConstants:
     def test_execution_result_marker_unchanged(self) -> None:
-        assert EXECUTION_RESULT_MARKER == "STARDRIFTER_EXECUTION_RESULT_JSON="
+        assert EXECUTION_RESULT_MARKER == "TASKPLANE_EXECUTION_RESULT_JSON="
 
     def test_valid_execution_kinds(self) -> None:
         assert "terminal" in VALID_EXECUTION_KINDS

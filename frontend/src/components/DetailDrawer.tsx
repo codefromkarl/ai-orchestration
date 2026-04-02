@@ -57,6 +57,18 @@ function formatAge(seconds?: number | null) {
   return `${Math.round(seconds / 86400)}d`;
 }
 
+function formatTimestamp(value?: string | null) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 interface DetailDrawerProps {
   item: DrawerDetailItem | null;
   onClose: () => void;
@@ -275,6 +287,103 @@ export function DetailDrawer({ item, onClose, onStorySelect, onTaskSelect, onAct
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {item.kind === 'task' && item.runtimeSessions && item.runtimeSessions.length > 0 && (
+          <div className="pt-3 border-t space-y-3 border-border">
+            <div>
+              <div className="text-sm font-medium text-text">
+                Session Runtime
+              </div>
+              <div className="mt-1 text-sm text-text-secondary">
+                最近会话与最新 checkpoint 摘要。
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              {item.runtimeSessions.map((session) => (
+                <div
+                  key={session.id}
+                  className="rounded-xl border border-border bg-surface-hover px-3 py-3"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-text">
+                        {session.id}
+                      </div>
+                      <div className="mt-1 text-xs text-text-secondary">
+                        {(session.currentPhase || session.status || 'session')}{session.attemptIndex !== undefined ? ` · attempt ${session.attemptIndex}` : ''}
+                      </div>
+                    </div>
+                    {session.status && (
+                      <span className="inline-flex items-center rounded-full bg-surface px-2 py-0.5 text-[11px] font-semibold text-text-secondary">
+                        {session.status}
+                      </span>
+                    )}
+                  </div>
+
+                  {(session.checkpointSummary || session.checkpointNextAction || session.waitingReason) && (
+                    <div className="mt-3 space-y-1 text-sm">
+                      {session.checkpointSummary && (
+                        <div className="text-text">
+                          {session.checkpointSummary}
+                        </div>
+                      )}
+                      <div className="text-xs text-text-secondary">
+                        {[session.checkpointNextAction, session.waitingReason, formatTimestamp(session.updatedAt)].filter(Boolean).join(' · ')}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {item.kind === 'task' && item.artifacts && item.artifacts.length > 0 && (
+          <div className="pt-3 border-t space-y-3 border-border">
+            <div>
+              <div className="text-sm font-medium text-text">
+                Artifacts
+              </div>
+              <div className="mt-1 text-sm text-text-secondary">
+                最近产出的工件与摘要引用。
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              {item.artifacts.map((artifact) => (
+                <div
+                  key={artifact.id}
+                  className="rounded-xl border border-border bg-surface-hover px-3 py-3"
+                >
+                  <div className="text-sm font-medium text-text">
+                    {artifact.artifactType || 'artifact'}
+                  </div>
+                  <div className="mt-1 break-all text-xs text-text-secondary">
+                    {artifact.artifactKey || '—'}
+                  </div>
+                  {(artifact.summary || artifact.sessionId || artifact.createdAt) && (
+                    <div className="mt-3 space-y-1">
+                      {artifact.summary && (
+                        <div className="text-sm text-text">
+                          {artifact.summary}
+                        </div>
+                      )}
+                      <div className="text-xs text-text-secondary">
+                        {[
+                          artifact.sessionId ? `session ${artifact.sessionId}` : '',
+                          artifact.runId !== undefined && artifact.runId !== null ? `run ${artifact.runId}` : '',
+                          artifact.contentSizeBytes !== undefined ? `${artifact.contentSizeBytes} bytes` : '',
+                          formatTimestamp(artifact.createdAt),
+                        ].filter(Boolean).join(' · ')}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
         )}

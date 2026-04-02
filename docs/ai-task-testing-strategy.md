@@ -175,7 +175,7 @@ The repository already persists the raw ingredients for this:
 
 The first reporting helper now exists in:
 
-- `src/stardrifter_orchestration_mvp/attempt_report.py`
+- `src/taskplane/attempt_report.py`
 
 This should be treated as the starting point for success-rate observability, not the final form.
 
@@ -217,7 +217,7 @@ That distribution gives the best balance between confidence, speed, and cost.
 
 ### Real PostgreSQL integration tests
 
-- selected `tests/test_repository.py` cases gated by `STARDRIFTER_TEST_POSTGRES_DSN`
+- selected `tests/test_repository.py` cases gated by `TASKPLANE_TEST_POSTGRES_DSN`
 
 ---
 

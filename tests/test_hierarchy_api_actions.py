@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from stardrifter_orchestration_mvp import hierarchy_api
+from taskplane import hierarchy_api
 
 
 def test_get_epic_story_tree_route_returns_tree_payload(monkeypatch):
@@ -170,3 +170,60 @@ def test_get_agent_efficiency_stats_route_returns_payload(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["stats"][0]["agent_name"] == "planner"
+
+
+def test_get_executor_routing_profiles_route_returns_payload(monkeypatch):
+    client = TestClient(hierarchy_api.app)
+
+    class FakeConnection:
+        def close(self):
+            return None
+
+    monkeypatch.setattr(
+        hierarchy_api,
+        "list_executor_routing_profiles",
+        lambda connection: {
+            "profiles": [
+                {
+                    "id": 1,
+                    "task_type": "core_path",
+                    "priority": 300,
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(hierarchy_api, "_get_connection", lambda: FakeConnection())
+
+    response = client.get("/api/executors/routing")
+
+    assert response.status_code == 200
+    assert response.json()["profiles"][0]["priority"] == 300
+
+
+def test_get_executor_selection_events_route_returns_payload(monkeypatch):
+    client = TestClient(hierarchy_api.app)
+
+    class FakeConnection:
+        def close(self):
+            return None
+
+    monkeypatch.setattr(
+        hierarchy_api,
+        "list_executor_selection_events",
+        lambda connection, *, repo, limit: {
+            "repo": repo,
+            "events": [
+                {
+                    "id": 9,
+                    "executor_name": "codex",
+                    "work_id": "task-1",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(hierarchy_api, "_get_connection", lambda: FakeConnection())
+
+    response = client.get("/api/repos/codefromkarl/stardrifter/executor-selections?limit=50")
+
+    assert response.status_code == 200
+    assert response.json()["events"][0]["executor_name"] == "codex"

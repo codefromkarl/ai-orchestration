@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from stardrifter_orchestration_mvp.clock import FrozenClock, RealClock
+from taskplane.clock import FrozenClock, RealClock
 
 
 class TestFrozenClock:
@@ -47,7 +47,7 @@ class TestRealClock:
 
 class TestClockWithWakeup:
     def test_far_future_not_wakeable(self) -> None:
-        from stardrifter_orchestration_mvp.session_manager import InMemorySessionManager
+        from taskplane.session_manager import InMemorySessionManager
 
         far_future = datetime(2099, 1, 1, tzinfo=UTC).isoformat()
         mgr = InMemorySessionManager()
@@ -57,7 +57,7 @@ class TestClockWithWakeup:
         assert len(wakeable) == 0
 
     def test_past_time_is_wakeable(self) -> None:
-        from stardrifter_orchestration_mvp.session_manager import InMemorySessionManager
+        from taskplane.session_manager import InMemorySessionManager
 
         past = datetime(2000, 1, 1, tzinfo=UTC).isoformat()
         mgr = InMemorySessionManager()

@@ -4,15 +4,19 @@ import json
 
 from typing import Any, cast
 
-from stardrifter_orchestration_mvp.adapters import (
+from taskplane.adapters import (
     build_controlled_executor,
+    build_browser_executor,
     build_shell_executor,
     build_shell_verifier,
     build_task_executor,
     build_task_verifier,
 )
-from stardrifter_orchestration_mvp.execution_protocol import EXECUTION_RESULT_MARKER
-from stardrifter_orchestration_mvp.models import ExecutionContext, WorkItem
+from taskplane.execution_protocol import (
+    EXECUTION_CHECKPOINT_MARKER,
+    EXECUTION_RESULT_MARKER,
+)
+from taskplane.models import ExecutionContext, WorkItem
 
 
 def test_shell_executor_runs_command_and_returns_success(tmp_path):
@@ -95,6 +99,39 @@ def test_shell_executor_extracts_structured_execution_result(tmp_path):
     assert EXECUTION_RESULT_MARKER not in result.summary
 
 
+def test_shell_executor_extracts_checkpoint_payload_and_strips_marker(tmp_path):
+    work_item = WorkItem(
+        id="task-10",
+        title="checkpointed execution",
+        lane="Lane 01",
+        wave="wave-1",
+        status="in_progress",
+    )
+    executor = build_shell_executor(
+        command_template=(
+            "python3 - <<'PY'\n"
+            "print('working...')\n"
+            "print('{marker}{payload}')\n"
+            "PY"
+        ).format(
+            marker=EXECUTION_CHECKPOINT_MARKER,
+            payload='{"execution_kind":"checkpoint","phase":"implementing","summary":"step 1"}',
+        ),
+        workdir=tmp_path,
+    )
+
+    result = executor(work_item)
+
+    assert result.success is True
+    assert result.result_payload_json == {
+        "execution_kind": "checkpoint",
+        "phase": "implementing",
+        "summary": "step 1",
+    }
+    assert EXECUTION_CHECKPOINT_MARKER not in result.summary
+    assert "working..." in result.summary
+
+
 def test_shell_executor_calls_heartbeat_while_command_is_running(tmp_path):
     work_item = WorkItem(
         id="task-15",
@@ -164,7 +201,7 @@ def test_shell_executor_exports_execution_context_json(tmp_path):
     executor = build_shell_executor(
         command_template=(
             'python3 -c "import os, pathlib; '
-            "pathlib.Path(r'{output}').write_text(os.environ['STARDRIFTER_EXECUTION_CONTEXT_JSON'])\""
+            "pathlib.Path(r'{output}').write_text(os.environ['TASKPLANE_EXECUTION_CONTEXT_JSON'])\""
         ).format(output=output_path),
         workdir=tmp_path,
     )
@@ -196,7 +233,7 @@ def test_shell_executor_exports_execution_context_json(tmp_path):
 
 def test_controlled_executor_preserves_payload_semantics(monkeypatch, tmp_path):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     work_item = WorkItem(
@@ -215,7 +252,7 @@ def test_controlled_executor_preserves_payload_semantics(monkeypatch, tmp_path):
         return 5
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.opencode_task_executor.run_controlled_opencode_task",
+        "taskplane.opencode_task_executor.run_controlled_opencode_task",
         fake_run_controlled_opencode_task,
     )
 
@@ -235,9 +272,93 @@ def test_controlled_executor_preserves_payload_semantics(monkeypatch, tmp_path):
     assert EXECUTION_RESULT_MARKER not in result.summary
 
 
+def test_controlled_executor_extracts_checkpoint_payload(monkeypatch, tmp_path):
+    monkeypatch.setenv(
+        "TASKPLANE_DSN",
+        "postgresql://user:pass@localhost:5432/stardrifter",
+    )
+    work_item = WorkItem(
+        id="issue-140",
+        title="[09-IMPL] Checkpointed adapter registry",
+        lane="Lane 09",
+        wave="Wave0",
+        status="in_progress",
+    )
+
+    def fake_run_controlled_opencode_task(**kwargs):
+        print("scanning workspace")
+        print(
+            f"{EXECUTION_CHECKPOINT_MARKER}"
+            '{"execution_kind":"checkpoint","phase":"researching","summary":"found modules"}'
+        )
+        return 0
+
+    monkeypatch.setattr(
+        "taskplane.opencode_task_executor.run_controlled_opencode_task",
+        fake_run_controlled_opencode_task,
+    )
+
+    executor = build_controlled_executor(workdir=tmp_path)
+    result = executor(work_item)
+
+    assert result.success is True
+    assert result.result_payload_json == {
+        "execution_kind": "checkpoint",
+        "phase": "researching",
+        "summary": "found modules",
+    }
+    assert EXECUTION_CHECKPOINT_MARKER not in result.summary
+    assert "scanning workspace" in result.summary
+
+
+def test_browser_executor_uses_real_browser_backend(monkeypatch, tmp_path):
+    calls: list[dict[str, str]] = []
+
+    class FakeBrowserExecutor:
+        def __init__(self, output_dir):
+            self.output_dir = output_dir
+
+        def screenshot(self, url: str, filename: str | None = None):
+            calls.append({"url": url, "filename": filename or ""})
+            return type(
+                "ScreenshotResult",
+                (),
+                {
+                    "path": str(tmp_path / "shot.png"),
+                    "content_digest": "digest",
+                    "width": 1280,
+                    "height": 720,
+                },
+            )()
+
+    monkeypatch.setattr(
+        "taskplane.adapters.BrowserExecutor",
+        FakeBrowserExecutor,
+    )
+    work_item = WorkItem(
+        id="task-browser-1",
+        title="browser task",
+        lane="Lane 04",
+        wave="wave-1",
+        status="in_progress",
+    )
+    executor = build_browser_executor(
+        command_template='{"action":"screenshot","url":"https://example.com","filename":"page.png"}',
+        workdir=tmp_path,
+    )
+
+    result = executor(work_item)
+
+    assert result.success is True
+    assert calls == [{"url": "https://example.com", "filename": "page.png"}]
+    assert result.result_payload_json is not None
+    assert result.result_payload_json["browser_action"] == "screenshot"
+    assert result.result_payload_json["artifact_path"].endswith("shot.png")
+
+
 def test_controlled_executor_calls_heartbeat_while_opencode_runs(monkeypatch, tmp_path):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     work_item = WorkItem(
@@ -261,7 +382,7 @@ def test_controlled_executor_calls_heartbeat_while_opencode_runs(monkeypatch, tm
         return 0
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.opencode_task_executor.run_controlled_opencode_task",
+        "taskplane.opencode_task_executor.run_controlled_opencode_task",
         fake_run_controlled_opencode_task,
     )
 
@@ -278,6 +399,50 @@ def test_controlled_executor_calls_heartbeat_while_opencode_runs(monkeypatch, tm
     assert result.result_payload_json == {
         "outcome": "done",
         "summary": "done",
+        "decision_required": False,
+    }
+
+
+def test_controlled_executor_uses_codex_runner_for_codex_command(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv(
+        "TASKPLANE_DSN",
+        "postgresql://user:pass@localhost:5432/stardrifter",
+    )
+    work_item = WorkItem(
+        id="issue-201",
+        title="[09-IMPL] Codex executor",
+        lane="Lane 09",
+        wave="Wave0",
+        status="in_progress",
+    )
+
+    def fake_run_controlled_codex_task(**kwargs):
+        print(
+            f"{EXECUTION_RESULT_MARKER}"
+            '{"outcome":"done","summary":"done by codex","decision_required":false}'
+        )
+        return 0
+
+    monkeypatch.setattr(
+        "taskplane.codex_task_executor.run_controlled_codex_task",
+        fake_run_controlled_codex_task,
+    )
+
+    executor = build_controlled_executor(
+        workdir=tmp_path,
+        command_template="python3 -m taskplane.codex_task_executor",
+    )
+    result = executor(work_item)
+
+    assert result.success is True
+    assert result.command_digest == (
+        "python -m taskplane.codex_task_executor"
+    )
+    assert result.result_payload_json == {
+        "outcome": "done",
+        "summary": "done by codex",
         "decision_required": False,
     }
 
@@ -307,7 +472,7 @@ def test_task_executor_routes_implementation_tasks_to_controlled_path(
     def fake_shell_builder(*, command_template: str, workdir: Path):
         assert (
             command_template
-            == "python3 -m stardrifter_orchestration_mvp.opencode_task_executor"
+            == "python3 -m taskplane.opencode_task_executor"
         )
         assert workdir == tmp_path
 
@@ -318,16 +483,16 @@ def test_task_executor_routes_implementation_tasks_to_controlled_path(
         return _executor
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.adapters.build_controlled_executor",
+        "taskplane.adapters.build_controlled_executor",
         fake_controlled_builder,
     )
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.adapters.build_shell_executor",
+        "taskplane.adapters.build_shell_executor",
         fake_shell_builder,
     )
 
     executor = build_task_executor(
-        command_template="python3 -m stardrifter_orchestration_mvp.opencode_task_executor",
+        command_template="python3 -m taskplane.opencode_task_executor",
         workdir=tmp_path,
     )
 
@@ -364,11 +529,11 @@ def test_task_executor_routes_non_implementation_tasks_to_shell_path(
         return _executor
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.adapters.build_controlled_executor",
+        "taskplane.adapters.build_controlled_executor",
         fake_controlled_builder,
     )
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.adapters.build_shell_executor",
+        "taskplane.adapters.build_shell_executor",
         fake_shell_builder,
     )
 
@@ -415,11 +580,11 @@ def test_task_executor_uses_title_signal_only_when_task_type_metadata_missing(
         return _executor
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.adapters.build_controlled_executor",
+        "taskplane.adapters.build_controlled_executor",
         fake_controlled_builder,
     )
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.adapters.build_shell_executor",
+        "taskplane.adapters.build_shell_executor",
         fake_shell_builder,
     )
 
@@ -433,7 +598,7 @@ def test_task_executor_uses_title_signal_only_when_task_type_metadata_missing(
 def test_task_executor_routes_core_path_to_intelligent_when_enabled(
     monkeypatch, tmp_path
 ):
-    monkeypatch.setenv("STARDRIFTER_ENABLE_LLM_EXECUTOR", "1")
+    monkeypatch.setenv("TASKPLANE_ENABLE_LLM_EXECUTOR", "1")
     work_item = WorkItem(
         id="issue-501",
         title="[09-IMPL] LLM route",
@@ -466,11 +631,11 @@ def test_task_executor_routes_core_path_to_intelligent_when_enabled(
         return _executor
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.adapters.build_intelligent_executor",
+        "taskplane.adapters.build_intelligent_executor",
         fake_intelligent_builder,
     )
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.adapters.build_controlled_executor",
+        "taskplane.adapters.build_controlled_executor",
         fake_controlled_builder,
     )
 
@@ -480,8 +645,266 @@ def test_task_executor_routes_core_path_to_intelligent_when_enabled(
     assert calls == ["intelligent"]
 
 
+def test_task_executor_uses_executor_type_not_product_name_for_agent_cli_route(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("TASKPLANE_ENABLE_LLM_EXECUTOR", "1")
+    work_item = WorkItem(
+        id="issue-777",
+        title="[09-IMPL] generic agent cli",
+        lane="Lane 09",
+        wave="Wave0",
+        status="in_progress",
+        task_type="core_path",
+    )
+    calls: list[str] = []
+
+    class FakeRouter:
+        def select_executor(self, task_type: str):
+            del task_type
+            return cast(
+                Any,
+                type(
+                    "Cfg",
+                    (),
+                    {"executor_name": "internal-agent-x", "executor_type": "agent_cli"},
+                )(),
+            )
+
+    def fake_router_ctor(dsn: str, default_executor_name=None):
+        del dsn, default_executor_name
+        return FakeRouter()
+
+    def fake_intelligent_builder(*, command_template: str, workdir: Path):
+        def _executor(*args, **kwargs):
+            del args, kwargs
+            calls.append("intelligent")
+            return cast(Any, object())
+
+        return _executor
+
+    monkeypatch.setattr(
+        "taskplane.adapters.build_intelligent_executor",
+        fake_intelligent_builder,
+    )
+    monkeypatch.setattr(
+        "taskplane.executor_router.ExecutorRouter",
+        fake_router_ctor,
+    )
+
+    executor = build_task_executor(
+        command_template="echo shell",
+        workdir=tmp_path,
+        dsn="postgresql://fake/fake",
+    )
+    executor(work_item)
+
+    assert calls == ["intelligent"]
+
+
+def test_task_executor_passes_work_item_and_execution_context_to_router_when_supported(
+    monkeypatch, tmp_path
+):
+    work_item = WorkItem(
+        id="issue-779",
+        title="[09-IMPL] context aware route",
+        lane="Lane 09",
+        wave="Wave0",
+        status="in_progress",
+        task_type="core_path",
+        attempt_count=2,
+        last_failure_reason="timeout",
+    )
+    captured: dict[str, object] = {}
+    calls: list[str] = []
+
+    class FakeRouter:
+        def select_executor(self, task_type: str, **kwargs):
+            captured["task_type"] = task_type
+            captured["work_item"] = kwargs.get("work_item")
+            captured["execution_context"] = kwargs.get("execution_context")
+            return cast(
+                Any,
+                type(
+                    "Cfg",
+                    (),
+                    {"executor_name": "smart-router", "executor_type": "shell"},
+                )(),
+            )
+
+    def fake_router_ctor(dsn: str, default_executor_name=None):
+        del dsn, default_executor_name
+        return FakeRouter()
+
+    def fake_shell_builder(*, command_template: str, workdir: Path):
+        def _executor(*args, **kwargs):
+            del args, kwargs
+            calls.append("shell")
+            return cast(Any, object())
+
+        return _executor
+
+    monkeypatch.setattr(
+        "taskplane.adapters.build_shell_executor",
+        fake_shell_builder,
+    )
+    monkeypatch.setattr(
+        "taskplane.executor_router.ExecutorRouter",
+        fake_router_ctor,
+    )
+
+    executor = build_task_executor(
+        command_template="echo shell",
+        workdir=tmp_path,
+        dsn="postgresql://fake/fake",
+    )
+    execution_context = ExecutionContext(
+        work_id="issue-779",
+        title=work_item.title,
+        lane=work_item.lane,
+        wave=work_item.wave,
+        resume_hint="resume_candidate",
+    )
+    executor(work_item, execution_context=execution_context)
+
+    assert calls == ["shell"]
+    assert captured["task_type"] == "core_path"
+    assert captured["work_item"] == work_item
+    assert captured["execution_context"] == execution_context
+
+
+def test_task_executor_logs_executor_selection_event_when_router_matches(
+    monkeypatch, tmp_path
+):
+    work_item = WorkItem(
+        id="issue-780",
+        title="[09-IMPL] log selected executor",
+        lane="Lane 09",
+        wave="Wave0",
+        status="in_progress",
+        task_type="core_path",
+    )
+    logged: list[dict[str, object]] = []
+
+    class FakeRouter:
+        def select_executor(self, task_type: str, **kwargs):
+            del task_type, kwargs
+            return cast(
+                Any,
+                type(
+                    "Cfg",
+                    (),
+                    {
+                        "executor_name": "smart-router",
+                        "executor_type": "shell",
+                        "capabilities": ["bash"],
+                    },
+                )(),
+            )
+
+    def fake_router_ctor(dsn: str, default_executor_name=None):
+        del dsn, default_executor_name
+        return FakeRouter()
+
+    def fake_shell_builder(*, command_template: str, workdir: Path):
+        def _executor(*args, **kwargs):
+            del args, kwargs
+            return cast(Any, object())
+
+        return _executor
+
+    def fake_log_executor_selection(**kwargs):
+        logged.append(kwargs)
+
+    monkeypatch.setattr(
+        "taskplane.adapters.build_shell_executor",
+        fake_shell_builder,
+    )
+    monkeypatch.setattr(
+        "taskplane.adapters._log_executor_selection",
+        fake_log_executor_selection,
+    )
+    monkeypatch.setattr(
+        "taskplane.executor_router.ExecutorRouter",
+        fake_router_ctor,
+    )
+
+    executor = build_task_executor(
+        command_template="echo shell",
+        workdir=tmp_path,
+        dsn="postgresql://fake/fake",
+    )
+    executor(work_item)
+
+    assert logged == [
+        {
+            "dsn": "postgresql://fake/fake",
+            "work_item": work_item,
+            "executor_name": "smart-router",
+            "executor_type": "shell",
+            "task_type": "core_path",
+        }
+    ]
+
+
+def test_task_executor_routes_browser_by_executor_type(
+    monkeypatch, tmp_path
+):
+    work_item = WorkItem(
+        id="issue-778",
+        title="[09-UI] generic browser route",
+        lane="Lane 09",
+        wave="Wave0",
+        status="in_progress",
+        task_type="ui_visual",
+    )
+    calls: list[str] = []
+
+    class FakeRouter:
+        def select_executor(self, task_type: str):
+            del task_type
+            return cast(
+                Any,
+                type(
+                    "Cfg",
+                    (),
+                    {"executor_name": "visual-runner", "executor_type": "browser"},
+                )(),
+            )
+
+    def fake_router_ctor(dsn: str, default_executor_name=None):
+        del dsn, default_executor_name
+        return FakeRouter()
+
+    def fake_browser_builder(*, command_template: str, workdir: Path):
+        def _executor(*args, **kwargs):
+            del args, kwargs
+            calls.append("browser")
+            return cast(Any, object())
+
+        return _executor
+
+    monkeypatch.setattr(
+        "taskplane.adapters.build_browser_executor",
+        fake_browser_builder,
+    )
+    monkeypatch.setattr(
+        "taskplane.executor_router.ExecutorRouter",
+        fake_router_ctor,
+    )
+
+    executor = build_task_executor(
+        command_template="echo shell",
+        workdir=tmp_path,
+        dsn="postgresql://fake/fake",
+    )
+    executor(work_item)
+
+    assert calls == ["browser"]
+
+
 def test_task_verifier_routes_to_llm_verifier_when_enabled(monkeypatch, tmp_path):
-    monkeypatch.setenv("STARDRIFTER_ENABLE_LLM_VERIFIER", "true")
+    monkeypatch.setenv("TASKPLANE_ENABLE_LLM_VERIFIER", "true")
     calls: list[str] = []
 
     def fake_adaptive_builder(*, command_template: str, workdir: Path, check_type: str):
@@ -497,7 +920,7 @@ def test_task_verifier_routes_to_llm_verifier_when_enabled(monkeypatch, tmp_path
         return _verifier
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.adapters.build_adaptive_verifier",
+        "taskplane.adapters.build_adaptive_verifier",
         fake_adaptive_builder,
     )
 

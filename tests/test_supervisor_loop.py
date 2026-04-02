@@ -1,13 +1,13 @@
 from pathlib import Path
 from typing import Any
 
-from stardrifter_orchestration_mvp.models import EpicRunResult
-from stardrifter_orchestration_mvp.models import ProgramStory
-from stardrifter_orchestration_mvp.scheduling_loop import (
+from taskplane.models import EpicRunResult
+from taskplane.models import ProgramStory
+from taskplane.scheduling_loop import (
     _pid_exists,
     run_supervisor_iteration,
 )
-from stardrifter_orchestration_mvp.repository import PostgresControlPlaneRepository
+from taskplane.repository import PostgresControlPlaneRepository
 
 
 def test_run_supervisor_iteration_syncs_ready_states_before_scheduling(tmp_path):
@@ -883,7 +883,7 @@ def test_run_supervisor_iteration_uses_epic_aware_story_selection_for_story_work
             return []
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.repository.PostgresControlPlaneRepository",
+        "taskplane.repository.PostgresControlPlaneRepository",
         FakeRepository,
     )
 
@@ -892,12 +892,12 @@ def test_run_supervisor_iteration_uses_epic_aware_story_selection_for_story_work
         return [stories[-1]] if stories else []
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.epic_scheduler.select_story_batch",
+        "taskplane.epic_scheduler.select_story_batch",
         fake_select_story_batch,
     )
     # Also patch the import in schedulers.story_scheduler which re-exports from epic_scheduler
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.schedulers.story_scheduler.select_story_batch",
+        "taskplane.schedulers.story_scheduler.select_story_batch",
         fake_select_story_batch,
     )
 
@@ -1010,7 +1010,7 @@ def test_run_supervisor_iteration_passes_story_active_wave_to_story_worker(
             return []
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.repository.PostgresControlPlaneRepository",
+        "taskplane.repository.PostgresControlPlaneRepository",
         FakeRepository,
     )
 
@@ -1018,11 +1018,11 @@ def test_run_supervisor_iteration_passes_story_active_wave_to_story_worker(
         return stories[:1]
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.epic_scheduler.select_story_batch",
+        "taskplane.epic_scheduler.select_story_batch",
         fake_select_story_batch,
     )
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.schedulers.story_scheduler.select_story_batch",
+        "taskplane.schedulers.story_scheduler.select_story_batch",
         fake_select_story_batch,
     )
 
@@ -1128,7 +1128,7 @@ def test_run_supervisor_iteration_defaults_story_selection_to_one_per_epic(
             ]
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.repository.PostgresControlPlaneRepository",
+        "taskplane.repository.PostgresControlPlaneRepository",
         FakeRepository,
     )
 
@@ -1137,12 +1137,12 @@ def test_run_supervisor_iteration_defaults_story_selection_to_one_per_epic(
         return stories[:1]
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.epic_scheduler.select_story_batch",
+        "taskplane.epic_scheduler.select_story_batch",
         fake_select_story_batch,
     )
     # Also patch the import in schedulers.story_scheduler which re-exports from epic_scheduler
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.schedulers.story_scheduler.select_story_batch",
+        "taskplane.schedulers.story_scheduler.select_story_batch",
         fake_select_story_batch,
     )
 
@@ -1262,7 +1262,7 @@ def test_run_supervisor_iteration_allows_configured_multi_story_batch_per_epic(
             ]
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.repository.PostgresControlPlaneRepository",
+        "taskplane.repository.PostgresControlPlaneRepository",
         FakeRepository,
     )
 
@@ -1271,12 +1271,12 @@ def test_run_supervisor_iteration_allows_configured_multi_story_batch_per_epic(
         return stories[:max_batch_size]
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.epic_scheduler.select_story_batch",
+        "taskplane.epic_scheduler.select_story_batch",
         fake_select_story_batch,
     )
     # Also patch the import in schedulers.story_scheduler which re-exports from epic_scheduler
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.schedulers.story_scheduler.select_story_batch",
+        "taskplane.schedulers.story_scheduler.select_story_batch",
         fake_select_story_batch,
     )
 
@@ -1482,7 +1482,7 @@ def test_run_supervisor_iteration_prefers_epic_iteration_story_selection_over_co
             return None
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.scheduling_loop.PostgresControlPlaneRepository",
+        "taskplane.scheduling_loop.PostgresControlPlaneRepository",
         FakeRepository,
     )
 
@@ -1491,11 +1491,11 @@ def test_run_supervisor_iteration_prefers_epic_iteration_story_selection_over_co
         return stories[:max_batch_size]
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.epic_scheduler.select_story_batch",
+        "taskplane.epic_scheduler.select_story_batch",
         fake_select_story_batch,
     )
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.schedulers.story_scheduler.select_story_batch",
+        "taskplane.schedulers.story_scheduler.select_story_batch",
         fake_select_story_batch,
     )
 
@@ -1522,7 +1522,7 @@ def test_run_supervisor_iteration_prefers_epic_iteration_story_selection_over_co
         )
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.epic_runner.run_epic_iteration",
+        "taskplane.epic_runner.run_epic_iteration",
         fake_run_epic_iteration,
     )
 
@@ -1652,7 +1652,7 @@ def test_run_supervisor_iteration_keeps_story_completion_candidate_fallback_when
             return None
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.scheduling_loop.PostgresControlPlaneRepository",
+        "taskplane.scheduling_loop.PostgresControlPlaneRepository",
         FakeRepository,
     )
 
@@ -1685,7 +1685,7 @@ def test_run_supervisor_iteration_keeps_story_completion_candidate_fallback_when
         )
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.epic_runner.run_epic_iteration",
+        "taskplane.epic_runner.run_epic_iteration",
         fake_run_epic_iteration,
     )
 

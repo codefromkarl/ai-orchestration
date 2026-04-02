@@ -1,5 +1,5 @@
 -- ============================================================================
--- Data Integrity Triggers for Stardrifter Orchestration
+-- Data Integrity Triggers for Taskplane
 -- ============================================================================
 -- Purpose: Automatically inherit repo and wave from parent Story/Epic
 --          to ensure data consistency at the source

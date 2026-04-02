@@ -1,10 +1,10 @@
-from stardrifter_orchestration_mvp.governance_report_cli import main
-from stardrifter_orchestration_mvp.governance_report_cli import _load_report_rows
+from taskplane.governance_report_cli import main
+from taskplane.governance_report_cli import _load_report_rows
 
 
 def test_governance_report_cli_prints_summary(monkeypatch, capsys):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
 
@@ -50,7 +50,7 @@ def test_governance_report_cli_prints_summary(monkeypatch, capsys):
 
 def test_governance_report_cli_marks_active_story_without_task_container(monkeypatch, capsys):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
 
@@ -81,7 +81,7 @@ def test_governance_report_cli_marks_active_story_without_task_container(monkeyp
 
 def test_governance_report_cli_marks_decomposing_story(monkeypatch, capsys):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
 

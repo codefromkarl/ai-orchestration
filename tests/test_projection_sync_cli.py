@@ -1,11 +1,11 @@
-from stardrifter_orchestration_mvp.import_cli import main as import_main
-from stardrifter_orchestration_mvp.models import GitHubTaskProjection, WorkItem
-from stardrifter_orchestration_mvp.projection_sync_cli import main
+from taskplane.import_cli import main as import_main
+from taskplane.models import GitHubTaskProjection, WorkItem
+from taskplane.projection_sync_cli import main
 
 
 def test_projection_sync_cli_loads_repo_and_syncs_projection(monkeypatch, capsys):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}

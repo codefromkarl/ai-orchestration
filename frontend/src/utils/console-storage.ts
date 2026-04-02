@@ -1,4 +1,4 @@
-export const CONSOLE_LOCALE_STORAGE_KEY = 'stardrifter-console-locale';
+export const CONSOLE_LOCALE_STORAGE_KEY = 'taskplane-console-locale';
 export const CONSOLE_SIDEBAR_COLLAPSED_STORAGE_KEY = 'stardrifter-console-sidebar-collapsed';
 export const CONSOLE_FILTERS_STORAGE_KEY = 'stardrifter-console-filters';
 

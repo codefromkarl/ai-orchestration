@@ -69,6 +69,7 @@ export default function App() {
   const workspaceItems: Array<{ id: import('./types').WorkspaceViewId; label: string }> = [
     { id: 'epic_overview', label: 'Epic 视图' },
     { id: 'running_jobs', label: '运行中的作业' },
+    { id: 'runtime_observability', label: '运行态观测' },
     { id: 'task_repository', label: '任务仓库' },
     { id: 'command_center', label: '指挥中心' },
     { id: 'story_tree', label: '故事树' },
@@ -353,6 +354,7 @@ function KanbanView() {
   const workspaceItems: Array<{ id: import('./types').WorkspaceViewId; label: string }> = [
     { id: 'epic_overview', label: 'Epic 视图' },
     { id: 'running_jobs', label: '运行中的作业' },
+    { id: 'runtime_observability', label: '运行态观测' },
     { id: 'task_repository', label: '任务仓库' },
     { id: 'command_center', label: '指挥中心' },
     { id: 'story_tree', label: '故事树' },
@@ -403,6 +405,7 @@ function KanbanView() {
           <WorkspacePanel
             activeView={store.activeWorkspaceView}
             jobs={store.runningJobs}
+            runtimeObservations={store.runtimeObservations}
             tasks={filteredWorkItems}
             notifications={store.notifications}
             failedNotifications={store.failedNotifications}

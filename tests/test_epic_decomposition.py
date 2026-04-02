@@ -1,6 +1,6 @@
 from typing import Any, cast
 
-from stardrifter_orchestration_mvp.epic_decomposition import (
+from taskplane.epic_decomposition import (
     DecompositionExecutionResult,
     run_shell_epic_decomposer,
     run_epic_decomposition,
@@ -120,6 +120,64 @@ def test_run_epic_decomposition_marks_epic_needs_refinement_when_refreshed_stori
     }
 
 
+def test_run_epic_decomposition_accepts_explicit_intake_refresher_object():
+    captured: dict[str, object] = {}
+    refresh_calls: list[tuple[object, str]] = []
+
+    class FakeRepository:
+        def set_program_epic_execution_status(
+            self, *, repo: str, issue_number: int, execution_status: str
+        ) -> None:
+            captured["repo"] = repo
+            captured["issue_number"] = issue_number
+            captured["execution_status"] = execution_status
+
+    class ExplicitRefresher:
+        def ingest(self, *, connection: object, repo: str) -> None:
+            refresh_calls.append((connection, repo))
+
+    snapshots = iter(
+        [
+            {
+                "epic_issue_number": 13,
+                "epic_title": "[Epic] Runtime orchestration",
+                "execution_status": "decomposing",
+                "epic_story_count": 0,
+                "active_story_count": 0,
+                "decomposing_story_count": 0,
+                "epic_body": "epic body",
+            },
+            {
+                "epic_issue_number": 13,
+                "epic_title": "[Epic] Runtime orchestration",
+                "execution_status": "decomposing",
+                "epic_story_count": 2,
+                "active_story_count": 1,
+                "decomposing_story_count": 1,
+                "epic_body": "epic body",
+            },
+        ]
+    )
+
+    repository = cast(Any, FakeRepository())
+    result = run_epic_decomposition(
+        repo="codefromkarl/stardrifter",
+        epic_issue_number=13,
+        repository=repository,
+        epic_loader=lambda **kwargs: next(snapshots),
+        decomposer=lambda **kwargs: DecompositionExecutionResult(
+            success=True,
+            outcome="decomposed",
+            summary="created stories",
+        ),
+        refresher=ExplicitRefresher(),
+    )
+
+    assert result.final_execution_status == "active"
+    assert refresh_calls == [(repository, "codefromkarl/stardrifter")]
+    assert captured["execution_status"] == "active"
+
+
 def test_run_shell_epic_decomposer_ignores_non_payload_marker_dicts(
     monkeypatch, tmp_path
 ):
@@ -134,8 +192,8 @@ def test_run_shell_epic_decomposer_ignores_non_payload_marker_dicts(
             returncode=0,
             stdout="\n".join(
                 [
-                    'STARDRIFTER_DECOMPOSITION_RESULT_JSON={"outcome":"blocked","summary":"awaiting repository context","reason_code":"awaiting_repository_context"}',
-                    'STARDRIFTER_DECOMPOSITION_RESULT_JSON={"type":"step-finish","reason":"stop"}',
+                    'TASKPLANE_DECOMPOSITION_RESULT_JSON={"outcome":"blocked","summary":"awaiting repository context","reason_code":"awaiting_repository_context"}',
+                    'TASKPLANE_DECOMPOSITION_RESULT_JSON={"type":"step-finish","reason":"stop"}',
                 ]
             ),
         )
@@ -150,7 +208,7 @@ def test_run_shell_epic_decomposer_ignores_non_payload_marker_dicts(
             "epic_title": "[Epic][Lane 09] Unified Bridge API 统一桥接层",
         },
         workdir=tmp_path,
-        decomposer_command="python3 -m stardrifter_orchestration_mvp.opencode_epic_decomposer",
+        decomposer_command="python3 -m taskplane.opencode_epic_decomposer",
     )
 
     assert result.success is True

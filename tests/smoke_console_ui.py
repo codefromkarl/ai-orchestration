@@ -14,17 +14,18 @@ from playwright.sync_api import sync_playwright
 
 PORT = 8024
 BASE_URL = f"http://127.0.0.1:{PORT}"
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _required_env(repo: str) -> dict[str, str]:
-    dsn = os.getenv("STARDRIFTER_TEST_POSTGRES_DSN")
+    dsn = os.getenv("TASKPLANE_TEST_POSTGRES_DSN")
     if not dsn:
-        pytest.skip("STARDRIFTER_TEST_POSTGRES_DSN is required for smoke UI test")
+        pytest.skip("TASKPLANE_TEST_POSTGRES_DSN is required for smoke UI test")
     assert dsn is not None
     return {
-        "STARDRIFTER_ORCHESTRATION_DSN": dsn,
-        "STARDRIFTER_CONSOLE_REPO_WORKDIRS_JSON": f'{{"{repo}":"/home/yuanzhi/Develop/tools/stardrifter-orchestration-mvp"}}',
-        "STARDRIFTER_CONSOLE_REPO_LOG_DIRS_JSON": f'{{"{repo}":"/tmp/stardrifter-console-logs"}}',
+        "TASKPLANE_DSN": dsn,
+        "TASKPLANE_CONSOLE_REPO_WORKDIRS_JSON": f'{{"{repo}":"{REPO_ROOT}"}}',
+        "TASKPLANE_CONSOLE_REPO_LOG_DIRS_JSON": f'{{"{repo}":"/tmp/taskplane-console-logs"}}',
     }
 
 
@@ -177,7 +178,7 @@ def _assert_console_has_no_stray_overlay_or_menu(page) -> None:
 @pytest.mark.integration
 def test_console_smoke_flow():
     repo = f"codefromkarl/stardrifter-smoke-{uuid4().hex[:8]}"
-    dsn = os.getenv("STARDRIFTER_TEST_POSTGRES_DSN")
+    dsn = os.getenv("TASKPLANE_TEST_POSTGRES_DSN")
     assert dsn is not None
     work_id = _seed_smoke_repo(dsn, repo)
 
@@ -189,13 +190,13 @@ def test_console_smoke_flow():
             [
                 "python3",
                 "-m",
-                "stardrifter_orchestration_mvp.hierarchy_api_cli",
+                "taskplane.hierarchy_api_cli",
                 "--host",
                 "127.0.0.1",
                 "--port",
                 str(PORT),
             ],
-            cwd="/home/yuanzhi/Develop/tools/stardrifter-orchestration-mvp",
+            cwd=str(REPO_ROOT),
             env=env,
             stdout=handle,
             stderr=subprocess.STDOUT,
@@ -351,7 +352,7 @@ def test_console_smoke_flow():
 @pytest.mark.integration
 def test_console_smoke_lazy_tree_flow():
     repo = f"codefromkarl/stardrifter-smoke-{uuid4().hex[:8]}"
-    dsn = os.getenv("STARDRIFTER_TEST_POSTGRES_DSN")
+    dsn = os.getenv("TASKPLANE_TEST_POSTGRES_DSN")
     assert dsn is not None
     _seed_smoke_repo(dsn, repo)
 
@@ -363,13 +364,13 @@ def test_console_smoke_lazy_tree_flow():
             [
                 "python3",
                 "-m",
-                "stardrifter_orchestration_mvp.hierarchy_api_cli",
+                "taskplane.hierarchy_api_cli",
                 "--host",
                 "127.0.0.1",
                 "--port",
                 str(PORT),
             ],
-            cwd="/home/yuanzhi/Develop/tools/stardrifter-orchestration-mvp",
+            cwd=str(REPO_ROOT),
             env=env,
             stdout=handle,
             stderr=subprocess.STDOUT,
@@ -416,7 +417,7 @@ def test_console_smoke_lazy_tree_flow():
 @pytest.mark.integration
 def test_console_job_detail_smoke_flow():
     repo = f"codefromkarl/stardrifter-job-{uuid4().hex[:8]}"
-    dsn = os.getenv("STARDRIFTER_TEST_POSTGRES_DSN")
+    dsn = os.getenv("TASKPLANE_TEST_POSTGRES_DSN")
     assert dsn is not None
     work_id = _seed_smoke_repo(dsn, repo)
     with psycopg.connect(dsn) as connection:
@@ -451,13 +452,13 @@ def test_console_job_detail_smoke_flow():
             [
                 "python3",
                 "-m",
-                "stardrifter_orchestration_mvp.hierarchy_api_cli",
+                "taskplane.hierarchy_api_cli",
                 "--host",
                 "127.0.0.1",
                 "--port",
                 str(PORT),
             ],
-            cwd="/home/yuanzhi/Develop/tools/stardrifter-orchestration-mvp",
+            cwd=str(REPO_ROOT),
             env=env,
             stdout=handle,
             stderr=subprocess.STDOUT,
@@ -507,7 +508,7 @@ def test_console_job_detail_smoke_flow():
 @pytest.mark.integration
 def test_console_notifications_and_agents_views_smoke_flow():
     repo = f"codefromkarl/stardrifter-panels-{uuid4().hex[:8]}"
-    dsn = os.getenv("STARDRIFTER_TEST_POSTGRES_DSN")
+    dsn = os.getenv("TASKPLANE_TEST_POSTGRES_DSN")
     assert dsn is not None
     _seed_smoke_repo(dsn, repo)
 
@@ -519,13 +520,13 @@ def test_console_notifications_and_agents_views_smoke_flow():
             [
                 "python3",
                 "-m",
-                "stardrifter_orchestration_mvp.hierarchy_api_cli",
+                "taskplane.hierarchy_api_cli",
                 "--host",
                 "127.0.0.1",
                 "--port",
                 str(PORT),
             ],
-            cwd="/home/yuanzhi/Develop/tools/stardrifter-orchestration-mvp",
+            cwd=str(REPO_ROOT),
             env=env,
             stdout=handle,
             stderr=subprocess.STDOUT,

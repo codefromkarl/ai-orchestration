@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from stardrifter_orchestration_mvp.intelligent_executor import (
+from taskplane.intelligent_executor import (
     IntelligentExecutor,
     IntelligentExecutorConfig,
     IntelligentVerifierConfig,
@@ -14,7 +14,7 @@ from stardrifter_orchestration_mvp.intelligent_executor import (
     llm_executor_enabled,
     llm_verifier_enabled,
 )
-from stardrifter_orchestration_mvp.models import WorkItem
+from taskplane.models import WorkItem
 
 
 class _FakeClient:
@@ -49,19 +49,31 @@ def _make_work_item() -> WorkItem:
 
 
 def test_llm_executor_enabled_by_env_and_virtual_command(monkeypatch):
-    monkeypatch.delenv("STARDRIFTER_ENABLE_LLM_EXECUTOR", raising=False)
+    monkeypatch.delenv("TASKPLANE_ENABLE_LLM_EXECUTOR", raising=False)
     assert llm_executor_enabled(command_template="echo hi") is False
     assert llm_executor_enabled(command_template="llm://executor") is True
-    monkeypatch.setenv("STARDRIFTER_ENABLE_LLM_EXECUTOR", "1")
+    monkeypatch.setenv("TASKPLANE_ENABLE_LLM_EXECUTOR", "1")
     assert llm_executor_enabled(command_template="echo hi") is True
 
 
 def test_llm_verifier_enabled_by_env_and_virtual_command(monkeypatch):
-    monkeypatch.delenv("STARDRIFTER_ENABLE_LLM_VERIFIER", raising=False)
+    monkeypatch.delenv("TASKPLANE_ENABLE_LLM_VERIFIER", raising=False)
     assert llm_verifier_enabled(command_template="pytest -q") is False
     assert llm_verifier_enabled(command_template="llm://verifier") is True
-    monkeypatch.setenv("STARDRIFTER_ENABLE_LLM_VERIFIER", "true")
+    monkeypatch.setenv("TASKPLANE_ENABLE_LLM_VERIFIER", "true")
     assert llm_verifier_enabled(command_template="pytest -q") is True
+
+
+def test_intelligent_executor_and_verifier_default_to_gpt_5_4_mini(monkeypatch):
+    monkeypatch.delenv("TASKPLANE_LLM_EXECUTOR_MODEL", raising=False)
+    monkeypatch.delenv("TASKPLANE_LLM_VERIFIER_MODEL", raising=False)
+    monkeypatch.delenv("TASKPLANE_LLM_MODEL", raising=False)
+
+    executor_config = IntelligentExecutorConfig.from_env()
+    verifier_config = IntelligentVerifierConfig.from_env()
+
+    assert executor_config.model == "gpt-4.1-mini"
+    assert verifier_config.model == "gpt-4.1-mini"
 
 
 def test_intelligent_executor_handles_tool_then_terminal_payload(tmp_path):
@@ -210,7 +222,7 @@ def test_intelligent_executor_retries_retryable_llm_request_error(tmp_path):
 
 
 def test_workspace_bash_tool_blocks_unsafe_command(monkeypatch, tmp_path):
-    monkeypatch.delenv("STARDRIFTER_LLM_BASH_ALLOW_UNSAFE", raising=False)
+    monkeypatch.delenv("TASKPLANE_LLM_BASH_ALLOW_UNSAFE", raising=False)
     toolbox = WorkspaceToolbox(workspace_path=tmp_path)
 
     output = toolbox.run(
@@ -227,7 +239,7 @@ def test_workspace_bash_tool_blocks_unsafe_command(monkeypatch, tmp_path):
 
 
 def test_workspace_bash_tool_allows_unsafe_when_override_enabled(monkeypatch, tmp_path):
-    monkeypatch.setenv("STARDRIFTER_LLM_BASH_ALLOW_UNSAFE", "1")
+    monkeypatch.setenv("TASKPLANE_LLM_BASH_ALLOW_UNSAFE", "1")
     toolbox = WorkspaceToolbox(workspace_path=tmp_path)
 
     output = toolbox.run(

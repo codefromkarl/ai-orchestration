@@ -1,4 +1,4 @@
-from stardrifter_orchestration_mvp.reconciliation import (
+from taskplane.reconciliation import (
     build_reconciliation_report,
     repair_reconciliation_drift,
 )
@@ -29,6 +29,44 @@ def test_build_reconciliation_report_detects_task_done_vs_github_status_drift():
             "github_status_label": "status:blocked",
         }
     ]
+
+
+def test_build_reconciliation_report_treats_pending_task_with_pending_label_as_aligned():
+    report = build_reconciliation_report(
+        task_rows=[
+            {
+                "issue_number": 91,
+                "db_status": "pending",
+                "db_decision_required": False,
+                "github_state": "OPEN",
+                "status_label": "status:pending",
+                "pull_url": None,
+            }
+        ],
+        epic_rows=[],
+        story_rows=[],
+    )
+
+    assert report["task_drift"] == []
+
+
+def test_build_reconciliation_report_treats_in_progress_task_with_in_progress_label_as_aligned():
+    report = build_reconciliation_report(
+        task_rows=[
+            {
+                "issue_number": 135,
+                "db_status": "in_progress",
+                "db_decision_required": False,
+                "github_state": "OPEN",
+                "status_label": "status:in-progress",
+                "pull_url": None,
+            }
+        ],
+        epic_rows=[],
+        story_rows=[],
+    )
+
+    assert report["task_drift"] == []
 
 
 def test_build_reconciliation_report_detects_story_done_vs_github_status_drift():
@@ -129,7 +167,7 @@ def test_build_reconciliation_report_detects_missing_story_branch_and_worktree()
                 "canonical_branch_exists": False,
                 "canonical_worktree_exists": False,
                 "github_state": "OPEN",
-                "status_label": "status:blocked",
+                "status_label": "status:pending",
             }
         ],
     )

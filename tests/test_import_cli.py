@@ -1,9 +1,9 @@
-from stardrifter_orchestration_mvp.import_cli import main
+from taskplane.import_cli import main
 
 
 def test_import_cli_fetches_and_persists(monkeypatch, capsys):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured = {}

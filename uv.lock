@@ -370,7 +370,7 @@ wheels = [
 ]
 
 [[package]]
-name = "stardrifter-orchestration-mvp"
+name = "taskplane"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

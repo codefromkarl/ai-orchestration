@@ -1,12 +1,12 @@
-from stardrifter_orchestration_mvp.models import EpicExecutionState, OperatorRequest
-from stardrifter_orchestration_mvp.dashboard_cli import _state_from_rows, main
+from taskplane.models import EpicExecutionState, OperatorRequest
+from taskplane.dashboard_cli import _state_from_rows, main
 
 
 def test_dashboard_cli_prints_repo_summary_operator_summary_and_epic_runtime_rows(
     monkeypatch, capsys
 ):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}
@@ -134,7 +134,7 @@ def test_dashboard_cli_prints_repo_summary_operator_summary_and_epic_runtime_row
 
 def test_dashboard_cli_prints_only_zero_summary_when_no_data(monkeypatch, capsys):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}

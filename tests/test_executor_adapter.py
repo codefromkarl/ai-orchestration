@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from stardrifter_orchestration_mvp.executor_adapter import (
+from taskplane.executor_adapter import (
     parse_executor_output,
 )
 
@@ -8,20 +8,20 @@ from stardrifter_orchestration_mvp.executor_adapter import (
 class TestParseExecutorOutput:
     def test_marker_result(self) -> None:
         stdout = (
-            'STARDRIFTER_EXECUTION_RESULT_JSON={"outcome":"done","summary":"completed"}'
+            'TASKPLANE_EXECUTION_RESULT_JSON={"outcome":"done","summary":"completed"}'
         )
         result = parse_executor_output(stdout, "", 0)
         assert result.success is True
         assert result.payload["outcome"] == "done"
 
     def test_marker_checkpoint(self) -> None:
-        stdout = 'STARDRIFTER_EXECUTION_CHECKPOINT_JSON={"execution_kind":"checkpoint","phase":"researching","summary":"found modules"}'
+        stdout = 'TASKPLANE_EXECUTION_CHECKPOINT_JSON={"execution_kind":"checkpoint","phase":"researching","summary":"found modules"}'
         result = parse_executor_output(stdout, "", 0)
         assert result.success is True
         assert result.payload["execution_kind"] == "checkpoint"
 
     def test_marker_wait(self) -> None:
-        stdout = 'STARDRIFTER_EXECUTION_WAIT_JSON={"execution_kind":"wait","wait_type":"timer","summary":"waiting"}'
+        stdout = 'TASKPLANE_EXECUTION_WAIT_JSON={"execution_kind":"wait","wait_type":"timer","summary":"waiting"}'
         result = parse_executor_output(stdout, "", 0)
         assert result.success is True
         assert result.payload["execution_kind"] == "wait"
@@ -52,13 +52,13 @@ class TestParseExecutorOutput:
         assert result.payload == {}
 
     def test_marker_takes_precedence_over_text_events(self) -> None:
-        marker = 'STARDRIFTER_EXECUTION_RESULT_JSON={"outcome":"done","summary":"from marker"}'
+        marker = 'TASKPLANE_EXECUTION_RESULT_JSON={"outcome":"done","summary":"from marker"}'
         text_event = '{"type":"text","part":{"text":"{\\"outcome\\":\\"blocked\\",\\"summary\\":\\"from text\\"}"}}'
         result = parse_executor_output(f"{text_event}\n{marker}", "", 0)
         assert result.payload["summary"] == "from marker"
 
     def test_stderr_marker_parsed(self) -> None:
-        stderr = 'STARDRIFTER_EXECUTION_CHECKPOINT_JSON={"execution_kind":"checkpoint","phase":"verifying","summary":"tests running"}'
+        stderr = 'TASKPLANE_EXECUTION_CHECKPOINT_JSON={"execution_kind":"checkpoint","phase":"verifying","summary":"tests running"}'
         result = parse_executor_output("", stderr, 0)
         assert result.success is True
         assert result.payload["execution_kind"] == "checkpoint"

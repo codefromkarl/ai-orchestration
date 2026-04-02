@@ -1,17 +1,17 @@
 from datetime import datetime, timedelta, timezone
 
-from stardrifter_orchestration_mvp.epic_runner import (
+from taskplane.epic_runner import (
     run_epic_iteration,
     run_epic_until_settled,
 )
-from stardrifter_orchestration_mvp.models import (
+from taskplane.models import (
     EPIC_RUNTIME_STATUSES,
     EpicExecutionState,
     OperatorRequest,
     ProgramStory,
     StoryRunResult,
 )
-from stardrifter_orchestration_mvp.repository import InMemoryControlPlaneRepository
+from taskplane.repository import InMemoryControlPlaneRepository
 
 
 def test_run_epic_until_settled_records_done_state_after_serial_story_completion():

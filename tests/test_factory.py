@@ -1,5 +1,5 @@
-from stardrifter_orchestration_mvp.factory import build_postgres_repository
-from stardrifter_orchestration_mvp.repository import PostgresControlPlaneRepository
+from taskplane.factory import build_postgres_repository
+from taskplane.repository import PostgresControlPlaneRepository
 
 
 def test_build_postgres_repository_uses_injected_connector():

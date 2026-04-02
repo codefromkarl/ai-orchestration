@@ -1,4 +1,4 @@
-from stardrifter_orchestration_mvp.github_writeback import sync_issue_status_via_gh
+from taskplane.github_writeback import sync_issue_status_via_gh
 
 
 def test_sync_issue_status_via_gh_sets_done_label_and_closes_issue():
@@ -21,10 +21,11 @@ def test_sync_issue_status_via_gh_sets_done_label_and_closes_issue():
     assert (
         "gh issue view 21 --repo codefromkarl/stardrifter --json labels" in captured[0]
     )
-    assert "gh issue edit 21 --repo codefromkarl/stardrifter" in captured[1]
-    assert "--add-label status:done" in captured[1]
-    assert "--remove-label status:blocked" not in captured[1]
-    assert "gh issue close 21 --repo codefromkarl/stardrifter" in captured[2]
+    assert "gh api repos/codefromkarl/stardrifter/issues/21/labels --method PUT" in captured[1]
+    assert "-f labels[]=status:done" in captured[1]
+    assert "-f labels[]=status:pending" not in captured[1]
+    assert "gh api repos/codefromkarl/stardrifter/issues/21 --method PATCH" in captured[2]
+    assert "-f state=closed" in captured[2]
 
 
 def test_sync_issue_status_via_gh_sets_blocked_label_without_closing_issue():
@@ -44,9 +45,11 @@ def test_sync_issue_status_via_gh_sets_blocked_label_without_closing_issue():
     )
 
     assert len(captured) == 3
-    assert "--add-label status:blocked" in captured[1]
-    assert "--remove-label status:done" in captured[1]
-    assert "gh issue reopen 22 --repo codefromkarl/stardrifter" in captured[2]
+    assert "gh api repos/codefromkarl/stardrifter/issues/22/labels --method PUT" in captured[1]
+    assert "-f labels[]=status:blocked" in captured[1]
+    assert "status:done" not in captured[1]
+    assert "gh api repos/codefromkarl/stardrifter/issues/22 --method PATCH" in captured[2]
+    assert "-f state=open" in captured[2]
 
 
 def test_sync_issue_status_via_gh_sets_decision_required_label():
@@ -55,7 +58,7 @@ def test_sync_issue_status_via_gh_sets_decision_required_label():
     def fake_runner(command: str) -> str:
         captured.append(command)
         if "gh issue view" in command:
-            return '{"labels":[{"name":"status:blocked"}]}'
+            return '{"labels":[{"name":"status:blocked"},{"name":"status:ready"}]}'
         return "ok"
 
     sync_issue_status_via_gh(
@@ -66,4 +69,6 @@ def test_sync_issue_status_via_gh_sets_decision_required_label():
         runner=fake_runner,
     )
 
-    assert "--add-label decision-required" in captured[1]
+    assert "-f labels[]=decision-required" in captured[1]
+    assert "-f labels[]=status:blocked" in captured[1]
+    assert "status:ready" not in captured[1]

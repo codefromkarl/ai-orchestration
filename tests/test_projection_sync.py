@@ -1,11 +1,11 @@
 from typing import cast
 
-from stardrifter_orchestration_mvp.models import (
+from taskplane.models import (
     GitHubTaskProjection,
     WorkDependency,
     WorkItem,
 )
-from stardrifter_orchestration_mvp.projection_sync import (
+from taskplane.projection_sync import (
     sync_projection_to_control_plane,
 )
 

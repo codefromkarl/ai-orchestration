@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-from stardrifter_orchestration_mvp.executor_adapter import parse_executor_output
-from stardrifter_orchestration_mvp.execution_protocol import (
+from taskplane.executor_adapter import parse_executor_output
+from taskplane.execution_protocol import (
     EXECUTION_CHECKPOINT_MARKER,
     EXECUTION_RESULT_MARKER,
     EXECUTION_WAIT_MARKER,

@@ -1,10 +1,10 @@
-from stardrifter_orchestration_mvp.github_importer import (
+from taskplane.github_importer import (
     build_completion_audit,
     extract_relation_candidates,
     normalize_github_issue,
 )
-from stardrifter_orchestration_mvp.issue_projection import project_github_tasks_to_work_items
-from stardrifter_orchestration_mvp.triage_report import build_triage_report
+from taskplane.issue_projection import project_github_tasks_to_work_items
+from taskplane.triage_report import build_triage_report
 
 
 def test_build_triage_report_reports_unprojected_tasks_and_empty_story():

@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from stardrifter_orchestration_mvp.policy_engine import evaluate_policy
-from stardrifter_orchestration_mvp.session_manager import InMemorySessionManager
-from stardrifter_orchestration_mvp.session_runtime_loop import (
+from taskplane.policy_engine import evaluate_policy
+from taskplane.session_manager import InMemorySessionManager
+from taskplane.session_runtime_loop import (
     ExecutorResult,
     run_session_to_completion,
 )
-from stardrifter_orchestration_mvp.wakeup_dispatcher import InMemoryWakeupDispatcher
+from taskplane.wakeup_dispatcher import InMemoryWakeupDispatcher
 
 
 def make_multi_step_executor():

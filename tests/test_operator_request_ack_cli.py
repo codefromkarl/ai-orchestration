@@ -1,16 +1,16 @@
 from datetime import datetime, timezone
 
-from stardrifter_orchestration_mvp.models import (
+from taskplane.models import (
     EpicExecutionState,
     OperatorRequest,
     ProgramStory,
 )
-from stardrifter_orchestration_mvp.operator_request_ack_cli import main
+from taskplane.operator_request_ack_cli import main
 
 
 def test_operator_request_ack_cli_closes_operator_request(monkeypatch, capsys):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}
@@ -111,7 +111,7 @@ def test_operator_request_ack_cli_returns_not_found_when_request_is_missing(
     monkeypatch, capsys
 ):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
 
@@ -153,7 +153,7 @@ def test_operator_request_ack_cli_refreshes_epic_runtime_after_closing_last_open
     monkeypatch, capsys
 ):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     progress_at = datetime(2026, 3, 1, 14, 0, tzinfo=timezone.utc)

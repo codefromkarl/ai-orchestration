@@ -249,6 +249,39 @@ export interface RunningJobsResponse {
   }>;
 }
 
+export interface RuntimeObservabilityResponse {
+  repo: string;
+  items: Array<{
+    work_id: string;
+    source_issue_number?: number;
+    title?: string;
+    status?: string;
+    lane?: string;
+    wave?: string;
+    blocked_reason?: string | null;
+    decision_required?: boolean;
+    last_failure_reason?: string | null;
+    active_claim_worker_name?: string | null;
+    session_id?: string | null;
+    session_status?: string | null;
+    session_attempt_index?: number | null;
+    session_current_phase?: string | null;
+    session_waiting_reason?: string | null;
+    session_updated_at?: string | null;
+    last_checkpoint_summary?: string | null;
+    last_checkpoint_next_action?: string | null;
+    artifact_id?: number | null;
+    artifact_session_id?: string | null;
+    artifact_run_id?: number | null;
+    artifact_type?: string | null;
+    artifact_key?: string | null;
+    artifact_mime_type?: string | null;
+    artifact_content_size_bytes?: number | null;
+    artifact_metadata?: Record<string, unknown>;
+    artifact_created_at?: string | null;
+  }>;
+}
+
 export interface JobDetailResponse {
   repo: string;
   job: {
@@ -382,6 +415,30 @@ export interface TaskDetailResponse {
     log_path?: string;
     started_at?: string;
   }>;
+  sessions: Array<{
+    id: string;
+    status?: string;
+    attempt_index?: number;
+    current_phase?: string;
+    waiting_reason?: string | null;
+    created_at?: string;
+    updated_at?: string;
+    last_checkpoint_phase?: string | null;
+    last_checkpoint_index?: number | null;
+    last_checkpoint_summary?: string | null;
+    last_checkpoint_next_action?: string | null;
+  }>;
+  artifacts: Array<{
+    id: number;
+    session_id?: string | null;
+    run_id?: number | null;
+    artifact_type?: string;
+    artifact_key?: string;
+    mime_type?: string;
+    content_size_bytes?: number;
+    metadata?: Record<string, unknown>;
+    created_at?: string;
+  }>;
 }
 
 export interface NotificationsResponse {
@@ -454,6 +511,10 @@ export async function getEpicDetail(repo: string, epicIssueNumber: number): Prom
 
 export async function getRunningJobs(repo: string): Promise<RunningJobsResponse> {
   return fetchJson<RunningJobsResponse>(`/api/repos/${encodeURIComponent(repo)}/jobs`);
+}
+
+export async function getRuntimeObservability(repo: string): Promise<RuntimeObservabilityResponse> {
+  return fetchJson<RuntimeObservabilityResponse>(`/api/repos/${encodeURIComponent(repo)}/runtime-observability`);
 }
 
 export async function getJobDetail(repo: string, jobId: number): Promise<JobDetailResponse> {

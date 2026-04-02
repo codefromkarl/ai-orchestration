@@ -1,5 +1,5 @@
-from stardrifter_orchestration_mvp.guardrails import evaluate_execution_guardrails
-from stardrifter_orchestration_mvp.models import (
+from taskplane.guardrails import evaluate_execution_guardrails
+from taskplane.models import (
     ExecutionGuardrailContext,
     WorkItem,
     WorkTarget,

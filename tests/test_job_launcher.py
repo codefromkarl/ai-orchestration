@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from stardrifter_orchestration_mvp.job_launcher import build_story_command
+from taskplane.job_launcher import build_story_command
 
 
 def test_build_story_command_default_waves_include_wave_4(
@@ -16,3 +16,6 @@ def test_build_story_command_default_waves_include_wave_4(
     )
 
     assert "--allowed-wave wave-4" in command
+    assert (
+        "python3 -m taskplane.codex_task_executor" in command
+    )

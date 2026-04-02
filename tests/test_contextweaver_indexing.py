@@ -6,7 +6,7 @@ from pathlib import Path
 import threading
 import time
 
-from stardrifter_orchestration_mvp.contextweaver_indexing import (
+from taskplane.contextweaver_indexing import (
     CheckoutAliasRecord,
     FileIndexRegistry,
     IndexArtifactRecord,
@@ -22,11 +22,11 @@ def test_resolve_repository_identity_prefers_explicit_repo(monkeypatch, tmp_path
     repo_root.mkdir()
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing._resolve_git_root",
+        "taskplane.contextweaver_indexing._resolve_git_root",
         lambda project_dir: repo_root,
     )
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing._git_stdout",
+        "taskplane.contextweaver_indexing._git_stdout",
         lambda repo_root, args: "abc123\n" if args == ["rev-parse", "HEAD"] else "",
     )
 
@@ -46,7 +46,7 @@ def test_resolve_repository_identity_marks_dirty_snapshot(monkeypatch, tmp_path)
     repo_root.mkdir()
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing._resolve_git_root",
+        "taskplane.contextweaver_indexing._resolve_git_root",
         lambda project_dir: repo_root,
     )
 
@@ -60,7 +60,7 @@ def test_resolve_repository_identity_marks_dirty_snapshot(monkeypatch, tmp_path)
         raise AssertionError(args)
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing._git_stdout",
+        "taskplane.contextweaver_indexing._git_stdout",
         fake_git_stdout,
     )
 
@@ -78,7 +78,7 @@ def test_resolve_repository_identity_reuses_same_dirty_fingerprint_for_same_chan
     repo_root.mkdir()
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing._resolve_git_root",
+        "taskplane.contextweaver_indexing._resolve_git_root",
         lambda project_dir: repo_root,
     )
 
@@ -92,7 +92,7 @@ def test_resolve_repository_identity_reuses_same_dirty_fingerprint_for_same_chan
         raise AssertionError(args)
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing._git_stdout",
+        "taskplane.contextweaver_indexing._git_stdout",
         fake_git_stdout,
     )
 
@@ -113,7 +113,7 @@ def test_resolve_repository_identity_changes_dirty_snapshot_for_different_change
     diff_output = {"value": "diff --git a/src/file.py b/src/file.py\n+line one\n"}
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing._resolve_git_root",
+        "taskplane.contextweaver_indexing._resolve_git_root",
         lambda project_dir: repo_root,
     )
 
@@ -127,7 +127,7 @@ def test_resolve_repository_identity_changes_dirty_snapshot_for_different_change
         raise AssertionError(args)
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing._git_stdout",
+        "taskplane.contextweaver_indexing._git_stdout",
         fake_git_stdout,
     )
 
@@ -164,7 +164,7 @@ def test_ensure_contextweaver_index_for_checkout_reuses_ready_snapshot_record(
     )
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing.resolve_repository_identity",
+        "taskplane.contextweaver_indexing.resolve_repository_identity",
         lambda project_dir, explicit_repo=None: RepositoryIdentity(
             project_dir=project_dir.resolve(),
             repo_root=(tmp_path / "repo").resolve(),
@@ -175,7 +175,7 @@ def test_ensure_contextweaver_index_for_checkout_reuses_ready_snapshot_record(
         ),
     )
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing._run_contextweaver_index",
+        "taskplane.contextweaver_indexing._run_contextweaver_index",
         lambda project_dir: calls.append(project_dir) or None,
     )
 
@@ -199,7 +199,7 @@ def test_ensure_contextweaver_index_for_checkout_indexes_on_registry_miss(
     registry = FileIndexRegistry(tmp_path / "registry.json")
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing.resolve_repository_identity",
+        "taskplane.contextweaver_indexing.resolve_repository_identity",
         lambda project_dir, explicit_repo=None: RepositoryIdentity(
             project_dir=project_dir.resolve(),
             repo_root=(tmp_path / "repo").resolve(),
@@ -210,7 +210,7 @@ def test_ensure_contextweaver_index_for_checkout_indexes_on_registry_miss(
         ),
     )
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing._run_contextweaver_index",
+        "taskplane.contextweaver_indexing._run_contextweaver_index",
         lambda project_dir: calls.append(project_dir) or None,
     )
 
@@ -241,9 +241,9 @@ def test_ensure_contextweaver_index_for_checkout_can_be_skipped_by_env(
         called = True
         raise AssertionError("contextweaver index should have been skipped")
 
-    monkeypatch.setenv("STARDRIFTER_SKIP_CONTEXTWEAVER_INDEX", "true")
+    monkeypatch.setenv("TASKPLANE_SKIP_CONTEXTWEAVER_INDEX", "true")
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing._run_contextweaver_index",
+        "taskplane.contextweaver_indexing._run_contextweaver_index",
         fake_run,
     )
 
@@ -269,15 +269,15 @@ def test_ensure_contextweaver_index_for_checkout_does_not_duplicate_build_when_l
     )
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing.resolve_repository_identity",
+        "taskplane.contextweaver_indexing.resolve_repository_identity",
         lambda project_dir, explicit_repo=None: identity,
     )
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing._run_contextweaver_index",
+        "taskplane.contextweaver_indexing._run_contextweaver_index",
         lambda project_dir: calls.append(project_dir) or None,
     )
-    monkeypatch.setenv("STARDRIFTER_CONTEXTWEAVER_LOCK_WAIT_SECONDS", "0.03")
-    monkeypatch.setenv("STARDRIFTER_CONTEXTWEAVER_LOCK_POLL_SECONDS", "0.01")
+    monkeypatch.setenv("TASKPLANE_CONTEXTWEAVER_LOCK_WAIT_SECONDS", "0.03")
+    monkeypatch.setenv("TASKPLANE_CONTEXTWEAVER_LOCK_POLL_SECONDS", "0.01")
 
     lock_path = registry.lock_path_for_artifact(
         repository_id="control:repo",
@@ -313,15 +313,15 @@ def test_ensure_contextweaver_index_for_checkout_waits_for_ready_artifact_when_l
     )
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing.resolve_repository_identity",
+        "taskplane.contextweaver_indexing.resolve_repository_identity",
         lambda project_dir, explicit_repo=None: identity,
     )
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing._run_contextweaver_index",
+        "taskplane.contextweaver_indexing._run_contextweaver_index",
         lambda project_dir: calls.append(project_dir) or None,
     )
-    monkeypatch.setenv("STARDRIFTER_CONTEXTWEAVER_LOCK_WAIT_SECONDS", "0.2")
-    monkeypatch.setenv("STARDRIFTER_CONTEXTWEAVER_LOCK_POLL_SECONDS", "0.01")
+    monkeypatch.setenv("TASKPLANE_CONTEXTWEAVER_LOCK_WAIT_SECONDS", "0.2")
+    monkeypatch.setenv("TASKPLANE_CONTEXTWEAVER_LOCK_POLL_SECONDS", "0.01")
 
     lock_path = registry.lock_path_for_artifact(
         repository_id="control:repo",
@@ -375,15 +375,15 @@ def test_ensure_contextweaver_index_for_checkout_returns_failed_artifact_error_a
     )
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing.resolve_repository_identity",
+        "taskplane.contextweaver_indexing.resolve_repository_identity",
         lambda project_dir, explicit_repo=None: identity,
     )
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing._run_contextweaver_index",
+        "taskplane.contextweaver_indexing._run_contextweaver_index",
         lambda project_dir: calls.append(project_dir) or None,
     )
-    monkeypatch.setenv("STARDRIFTER_CONTEXTWEAVER_LOCK_WAIT_SECONDS", "0.2")
-    monkeypatch.setenv("STARDRIFTER_CONTEXTWEAVER_LOCK_POLL_SECONDS", "0.01")
+    monkeypatch.setenv("TASKPLANE_CONTEXTWEAVER_LOCK_WAIT_SECONDS", "0.2")
+    monkeypatch.setenv("TASKPLANE_CONTEXTWEAVER_LOCK_POLL_SECONDS", "0.01")
 
     lock_path = registry.lock_path_for_artifact(
         repository_id="control:repo",
@@ -438,15 +438,15 @@ def test_ensure_contextweaver_index_for_checkout_times_out_waiting_for_inflight_
     )
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing.resolve_repository_identity",
+        "taskplane.contextweaver_indexing.resolve_repository_identity",
         lambda project_dir, explicit_repo=None: identity,
     )
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing._run_contextweaver_index",
+        "taskplane.contextweaver_indexing._run_contextweaver_index",
         lambda project_dir: calls.append(project_dir) or None,
     )
-    monkeypatch.setenv("STARDRIFTER_CONTEXTWEAVER_LOCK_WAIT_SECONDS", "0.03")
-    monkeypatch.setenv("STARDRIFTER_CONTEXTWEAVER_LOCK_POLL_SECONDS", "0.01")
+    monkeypatch.setenv("TASKPLANE_CONTEXTWEAVER_LOCK_WAIT_SECONDS", "0.03")
+    monkeypatch.setenv("TASKPLANE_CONTEXTWEAVER_LOCK_POLL_SECONDS", "0.01")
 
     lock_path = registry.lock_path_for_artifact(
         repository_id="control:repo",
@@ -482,14 +482,14 @@ def test_ensure_contextweaver_index_for_checkout_reclaims_stale_build_lock_and_i
     )
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing.resolve_repository_identity",
+        "taskplane.contextweaver_indexing.resolve_repository_identity",
         lambda project_dir, explicit_repo=None: identity,
     )
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing._run_contextweaver_index",
+        "taskplane.contextweaver_indexing._run_contextweaver_index",
         lambda project_dir: calls.append(project_dir) or None,
     )
-    monkeypatch.setenv("STARDRIFTER_CONTEXTWEAVER_LOCK_STALE_SECONDS", "0.01")
+    monkeypatch.setenv("TASKPLANE_CONTEXTWEAVER_LOCK_STALE_SECONDS", "0.01")
 
     lock_path = registry.lock_path_for_artifact(
         repository_id="control:repo",
@@ -534,16 +534,16 @@ def test_ensure_contextweaver_index_for_checkout_preserves_fresh_build_lock(
     )
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing.resolve_repository_identity",
+        "taskplane.contextweaver_indexing.resolve_repository_identity",
         lambda project_dir, explicit_repo=None: identity,
     )
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing._run_contextweaver_index",
+        "taskplane.contextweaver_indexing._run_contextweaver_index",
         lambda project_dir: calls.append(project_dir) or None,
     )
-    monkeypatch.setenv("STARDRIFTER_CONTEXTWEAVER_LOCK_STALE_SECONDS", "10")
-    monkeypatch.setenv("STARDRIFTER_CONTEXTWEAVER_LOCK_WAIT_SECONDS", "0.03")
-    monkeypatch.setenv("STARDRIFTER_CONTEXTWEAVER_LOCK_POLL_SECONDS", "0.01")
+    monkeypatch.setenv("TASKPLANE_CONTEXTWEAVER_LOCK_STALE_SECONDS", "10")
+    monkeypatch.setenv("TASKPLANE_CONTEXTWEAVER_LOCK_WAIT_SECONDS", "0.03")
+    monkeypatch.setenv("TASKPLANE_CONTEXTWEAVER_LOCK_POLL_SECONDS", "0.01")
 
     lock_path = registry.lock_path_for_artifact(
         repository_id="control:repo",
@@ -600,7 +600,7 @@ def test_snapshot_observation_reports_artifact_and_lock_metadata(tmp_path):
 
 def test_snapshot_observation_reports_stale_lock(tmp_path, monkeypatch):
     registry = FileIndexRegistry(tmp_path / "registry.json")
-    monkeypatch.setenv("STARDRIFTER_CONTEXTWEAVER_LOCK_STALE_SECONDS", "0.01")
+    monkeypatch.setenv("TASKPLANE_CONTEXTWEAVER_LOCK_STALE_SECONDS", "0.01")
     lock_path = registry.lock_path_for_artifact(
         repository_id="control:repo",
         snapshot_id="abc123",

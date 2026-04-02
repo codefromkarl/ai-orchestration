@@ -1,11 +1,11 @@
-from stardrifter_orchestration_mvp.models import (
+from taskplane.models import (
     ExecutionGuardrailContext,
     WorkClaim,
     WorkDependency,
     WorkItem,
     WorkTarget,
 )
-from stardrifter_orchestration_mvp.queue import evaluate_work_queue
+from taskplane.queue import evaluate_work_queue
 
 
 def test_evaluate_work_queue_separates_executable_and_blocked_ready_items():

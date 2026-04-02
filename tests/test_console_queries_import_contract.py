@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from stardrifter_orchestration_mvp import console_queries
+from taskplane import console_queries
 
 
 def test_console_queries_exports_stable_public_query_constants() -> None:

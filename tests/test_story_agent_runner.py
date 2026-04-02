@@ -1,11 +1,11 @@
-from stardrifter_orchestration_mvp.models import (
+from taskplane.models import (
     ExecutionGuardrailContext,
     StoryRunResult,
     VerificationEvidence,
     WorkItem,
 )
-from stardrifter_orchestration_mvp.story_agent_runner import run_story_agent
-from stardrifter_orchestration_mvp.worker import ExecutionResult
+from taskplane.story_agent_runner import run_story_agent
+from taskplane.worker import ExecutionResult
 
 
 def test_run_story_agent_loads_story_scope_and_delegates_to_story_runner():
@@ -61,5 +61,6 @@ def test_run_story_agent_loads_story_scope_and_delegates_to_story_runner():
             "story_integrator": None,
             "workspace_manager": None,
             "max_cycles": 100,
+            "dsn": None,
         }
     ]

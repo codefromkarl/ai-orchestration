@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from stardrifter_orchestration_mvp.models import ExecutionSession
-from stardrifter_orchestration_mvp.strategy_executor import (
+from taskplane.models import ExecutionSession
+from taskplane.strategy_executor import (
     apply_strategy_to_executor_kwargs,
     apply_strategy_to_prompt,
     resolve_strategy,
@@ -41,21 +41,21 @@ class TestResolveStrategy:
 
 class TestApplyStrategy:
     def test_apply_prompt_suffix(self) -> None:
-        from stardrifter_orchestration_mvp.strategy_executor import StrategyAdjustment
+        from taskplane.strategy_executor import StrategyAdjustment
 
         adj = StrategyAdjustment(prompt_suffix="\nExtra instruction")
         result = apply_strategy_to_prompt(base_prompt="Base prompt", adjustment=adj)
         assert result == "Base prompt\n\nExtra instruction"
 
     def test_apply_empty_suffix(self) -> None:
-        from stardrifter_orchestration_mvp.strategy_executor import StrategyAdjustment
+        from taskplane.strategy_executor import StrategyAdjustment
 
         adj = StrategyAdjustment(prompt_suffix="")
         result = apply_strategy_to_prompt(base_prompt="Base prompt", adjustment=adj)
         assert result == "Base prompt"
 
     def test_apply_executor_kwargs(self) -> None:
-        from stardrifter_orchestration_mvp.strategy_executor import StrategyAdjustment
+        from taskplane.strategy_executor import StrategyAdjustment
 
         adj = StrategyAdjustment(prompt_suffix="", bounded_mode_override=True)
         kwargs = {"timeout_seconds": 1200, "other": "value"}

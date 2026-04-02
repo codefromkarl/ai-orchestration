@@ -1,4 +1,4 @@
-# Stardrifter Orchestration MVP
+# Taskplane
 
 一个基于 PostgreSQL 的 AI 编排控制面（control plane）实现，当前以 Stardrifter 工作流作为参考适配层。
 
@@ -21,8 +21,8 @@
 ### 控制面与状态机
 
 - `sql/control_plane_schema.sql` 定义核心实体：`work_item`、`work_claim`、`execution_run`、`program_epic`、`program_story` 等
-- `src/stardrifter_orchestration_mvp/repository/` 提供 PostgreSQL 仓储实现（claim、lease、finalize、状态更新）
-- `src/stardrifter_orchestration_mvp/planner.py` / `queue.py` / `guardrails.py` 负责任务可执行性、依赖与安全边界
+- `src/taskplane/repository/` 提供 PostgreSQL 仓储实现（claim、lease、finalize、状态更新）
+- `src/taskplane/planner.py` / `queue.py` / `guardrails.py` 负责任务可执行性、依赖与安全边界
 
 ### GitHub 导入与投影
 
@@ -48,13 +48,13 @@
 ### Web UI 与 API
 
 - `hierarchy_api.py`：FastAPI 服务 + 静态页面托管
-- React 控制台静态资源在 `src/stardrifter_orchestration_mvp/static/`
+- React 控制台静态资源在 `src/taskplane/static/`
 - `frontend/` 为 Vite + React 源码，构建输出直接写入上述 static 目录
 
 ## 3. 目录速览
 
 ```text
-src/stardrifter_orchestration_mvp/
+src/taskplane/
   ├── repository/                  # PostgreSQL 仓储与控制面读写
   ├── console_queries/             # 控制台查询 SQL
   ├── static/                      # Web UI 静态产物（console.bundle.js 等）
@@ -98,31 +98,34 @@ python -m pip install -e .
 ### 5.2 配置数据库连接
 
 ```bash
-export STARDRIFTER_ORCHESTRATION_DSN='postgresql://stardrifter:stardrifter@localhost:5432/stardrifter_orchestration'
+export TASKPLANE_DSN='postgresql://stardrifter:stardrifter@localhost:5432/taskplane'
 ```
 
 ### 5.3 初始化数据库 Schema
 
 ```bash
-psql "$STARDRIFTER_ORCHESTRATION_DSN" -f sql/control_plane_schema.sql
-psql "$STARDRIFTER_ORCHESTRATION_DSN" -f sql/001_parallel_execution_extensions.sql
-psql "$STARDRIFTER_ORCHESTRATION_DSN" -f sql/002_global_coordination.sql
-psql "$STARDRIFTER_ORCHESTRATION_DSN" -f sql/003_ui_enhancements.sql
+psql "$TASKPLANE_DSN" -f sql/control_plane_schema.sql
+psql "$TASKPLANE_DSN" -f sql/001_parallel_execution_extensions.sql
+psql "$TASKPLANE_DSN" -f sql/002_global_coordination.sql
+psql "$TASKPLANE_DSN" -f sql/003_ui_enhancements.sql
+psql "$TASKPLANE_DSN" -f sql/004_artifact_store.sql
+psql "$TASKPLANE_DSN" -f sql/005_dlq_and_observability.sql
+psql "$TASKPLANE_DSN" -f sql/006_executor_routing_profiles.sql
 ```
 
 可选（数据完整性修复与触发器）：
 
 ```bash
-psql "$STARDRIFTER_ORCHESTRATION_DSN" -f sql/data_integrity_fixes.sql
-psql "$STARDRIFTER_ORCHESTRATION_DSN" -f sql/data_integrity_triggers.sql
+psql "$TASKPLANE_DSN" -f sql/data_integrity_fixes.sql
+psql "$TASKPLANE_DSN" -f sql/data_integrity_triggers.sql
 ```
 
 ### 5.4 GitHub issue -> 控制面
 
 ```bash
-stardrifter-orchestration-import --repo owner/repo --limit 200
-stardrifter-orchestration-project --repo owner/repo
-stardrifter-orchestration-governance --repo owner/repo
+taskplane-import --repo owner/repo --limit 200
+taskplane-project --repo owner/repo
+taskplane-governance --repo owner/repo
 ```
 
 ### 5.5 启动执行
@@ -130,20 +133,20 @@ stardrifter-orchestration-governance --repo owner/repo
 单次 worker cycle：
 
 ```bash
-stardrifter-orchestration-worker --worker-name local-worker
+taskplane-worker --worker-name local-worker
 ```
 
 按 Story 执行：
 
 ```bash
-stardrifter-orchestration-story --story-issue-number 123 --worker-name story-runner
+taskplane-story --story-issue-number 123 --worker-name story-runner
 ```
 
 Supervisor 循环：
 
 ```bash
-stardrifter-orchestration-supervisor \
-  --dsn "$STARDRIFTER_ORCHESTRATION_DSN" \
+taskplane-supervisor \
+  --dsn "$TASKPLANE_DSN" \
   --repo owner/repo \
   --project-dir /abs/path/to/project \
   --log-dir /abs/path/to/logs
@@ -152,7 +155,7 @@ stardrifter-orchestration-supervisor \
 ### 5.6 启动 UI
 
 ```bash
-stardrifter-orchestration-ui --dsn "$STARDRIFTER_ORCHESTRATION_DSN" --host 127.0.0.1 --port 8000
+taskplane-ui --dsn "$TASKPLANE_DSN" --host 127.0.0.1 --port 8000
 ```
 
 打开：
@@ -166,33 +169,33 @@ stardrifter-orchestration-ui --dsn "$STARDRIFTER_ORCHESTRATION_DSN" --host 127.0
 
 | 命令 | 作用 |
 | --- | --- |
-| `stardrifter-orchestration-worker` | 执行一次 worker cycle |
-| `stardrifter-orchestration-story` | 按 story 持续执行直到完成/阻塞 |
-| `stardrifter-orchestration-supervisor` | 运行调度循环并启动后台 job |
-| `stardrifter-orchestration-loop` | 运行 story-by-story 编排循环 |
-| `stardrifter-orchestration-import` | 导入 GitHub issue 到 staging |
-| `stardrifter-orchestration-project` | 同步 projection 到 work_item/work_dependency |
-| `stardrifter-orchestration-governance` | 同步治理层 epic/story |
-| `stardrifter-orchestration-governance-state` | 更新 epic/story execution status |
-| `stardrifter-orchestration-governance-report` | 输出治理树与任务关联状态 |
-| `stardrifter-orchestration-governance-priority` | 输出执行优先级建议快照 |
-| `stardrifter-orchestration-decompose` | 对指定 Story 运行任务分解 |
-| `stardrifter-orchestration-triage` | 输出 triage 报告 |
-| `stardrifter-orchestration-attempt-report` | 输出执行成功率/重试统计 |
-| `stardrifter-orchestration-reconciliation-report` | 检测并可选修复 DB/GitHub 漂移 |
-| `stardrifter-orchestration-hierarchy` | 打印 Epic -> Story -> Task 树 |
-| `stardrifter-orchestration-ui` | 启动 FastAPI + 控制台 UI |
-| `stardrifter-orchestration-operator` | operator request 的统一入口（list/ack/report） |
+| `taskplane-worker` | 执行一次 worker cycle |
+| `taskplane-story` | 按 story 持续执行直到完成/阻塞 |
+| `taskplane-supervisor` | 运行调度循环并启动后台 job |
+| `taskplane-loop` | 运行 story-by-story 编排循环 |
+| `taskplane-import` | 导入 GitHub issue 到 staging |
+| `taskplane-project` | 同步 projection 到 work_item/work_dependency |
+| `taskplane-governance` | 同步治理层 epic/story |
+| `taskplane-governance-state` | 更新 epic/story execution status |
+| `taskplane-governance-report` | 输出治理树与任务关联状态 |
+| `taskplane-governance-priority` | 输出执行优先级建议快照 |
+| `taskplane-decompose` | 对指定 Story 运行任务分解 |
+| `taskplane-triage` | 输出 triage 报告 |
+| `taskplane-attempt-report` | 输出执行成功率/重试统计 |
+| `taskplane-reconciliation-report` | 检测并可选修复 DB/GitHub 漂移 |
+| `taskplane-hierarchy` | 打印 Epic -> Story -> Task 树 |
+| `taskplane-ui` | 启动 FastAPI + 控制台 UI |
+| `taskplane-operator` | operator request 的统一入口（list/ack/report） |
 
 补充：`global_coordinator_cli.py` 当前主要通过模块方式运行：
 
 ```bash
-python -m stardrifter_orchestration_mvp.global_coordinator_cli --help
+python -m taskplane.global_coordinator_cli --help
 ```
 
 ## 7. Web API 概览
 
-主要在 `src/stardrifter_orchestration_mvp/hierarchy_api.py`：
+主要在 `src/taskplane/hierarchy_api.py`：
 
 - 页面：`/`、`/console`、`/hierarchy`
 - Repo 视图：`/api/repos`、`/api/repos/{repo}/summary`、`/api/repos/{repo}/epics`
@@ -214,7 +217,7 @@ python3 -m pytest -q
 ```bash
 scripts/test-console.sh unit
 
-export STARDRIFTER_TEST_POSTGRES_DSN='postgresql://stardrifter:stardrifter@localhost:5432/stardrifter_orchestration'
+export TASKPLANE_TEST_POSTGRES_DSN='postgresql://stardrifter:stardrifter@localhost:5432/taskplane'
 scripts/test-console.sh integration
 scripts/test-console.sh smoke
 scripts/test-console.sh all
@@ -223,7 +226,7 @@ scripts/test-console.sh all
 说明：
 
 - `unit` 不依赖 PostgreSQL
-- `integration` 和 `smoke` 依赖 `STARDRIFTER_TEST_POSTGRES_DSN`
+- `integration` 和 `smoke` 依赖 `TASKPLANE_TEST_POSTGRES_DSN`
 - CI 工作流 `.github/workflows/console-tests.yml` 默认跑 `unit`
 
 ## 9. 前端开发
@@ -245,8 +248,8 @@ npm run build
 
 输出目标（由 `frontend/vite.config.ts` 配置）：
 
-- `../src/stardrifter_orchestration_mvp/static/console.bundle.js`
-- `../src/stardrifter_orchestration_mvp/static/console.css`
+- `../src/taskplane/static/console.bundle.js`
+- `../src/taskplane/static/console.css`
 
 ## 10. 本地看板与数据库（可选）
 
@@ -262,6 +265,7 @@ docker compose --env-file .env -f ops/docker-compose.nocodb.yml up -d
 
 ## 11. 关键文档
 
+- `docs/architecture-overview.md`：当前实现的总体架构总览
 - `docs/substrate-architecture.md`：底座架构
 - `docs/mvp-design.md`：MVP 设计与边界
 - `docs/ai-task-testing-strategy.md`：测试策略

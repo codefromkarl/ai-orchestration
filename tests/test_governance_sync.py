@@ -1,5 +1,5 @@
-from stardrifter_orchestration_mvp.github_importer import normalize_github_issue
-from stardrifter_orchestration_mvp.governance_sync import (
+from taskplane.github_importer import normalize_github_issue
+from taskplane.governance_sync import (
     build_program_governance_projection,
     sync_program_governance_to_control_plane,
 )

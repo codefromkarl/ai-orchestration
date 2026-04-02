@@ -24,9 +24,9 @@ if str(SRC) not in sys.path:
 
 @pytest.fixture(scope="session")
 def postgres_test_dsn() -> str:
-    dsn = os.getenv("STARDRIFTER_TEST_POSTGRES_DSN", "").strip()
+    dsn = os.getenv("TASKPLANE_TEST_POSTGRES_DSN", "").strip()
     if not dsn:
-        pytest.skip("STARDRIFTER_TEST_POSTGRES_DSN is not set")
+        pytest.skip("TASKPLANE_TEST_POSTGRES_DSN is not set")
     if psycopg is None or dict_row is None:
         pytest.skip("psycopg is not installed")
     return dsn

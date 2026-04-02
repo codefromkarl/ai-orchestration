@@ -1,10 +1,10 @@
 services:
   postgres:
     image: postgres:16
-    container_name: stardrifter-orchestration-postgres
+    container_name: taskplane-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-stardrifter_orchestration}
+      POSTGRES_DB: ${POSTGRES_DB:-taskplane}
       POSTGRES_USER: ${POSTGRES_USER:-stardrifter}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stardrifter}
     ports:
@@ -16,7 +16,7 @@ services:
 
   metabase:
     image: metabase/metabase:latest
-    container_name: stardrifter-orchestration-metabase
+    container_name: taskplane-metabase
     restart: unless-stopped
     depends_on:
       - postgres

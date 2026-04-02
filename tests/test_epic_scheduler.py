@@ -1,6 +1,6 @@
-from stardrifter_orchestration_mvp.epic_scheduler import select_story_batch
-from stardrifter_orchestration_mvp.models import ExecutionStatus, ProgramStory, WorkItem
-from stardrifter_orchestration_mvp.repository import InMemoryControlPlaneRepository
+from taskplane.epic_scheduler import select_story_batch
+from taskplane.models import ExecutionStatus, ProgramStory, WorkItem
+from taskplane.repository import InMemoryControlPlaneRepository
 
 
 def _story(
@@ -108,6 +108,28 @@ def test_select_story_batch_treats_missing_planned_paths_as_not_batch_safe():
             ),
             _work_item(
                 "issue-702",
+                story_issue_number=42,
+                planned_paths=("tests/story_42_test.py",),
+            ),
+        ],
+        dependencies=[],
+        targets_by_work_id={},
+    )
+
+    selected = select_story_batch(
+        stories=[_story(41), _story(42)],
+        repository=repository,
+        max_batch_size=2,
+    )
+
+    assert [story.issue_number for story in selected] == [42]
+
+
+def test_select_story_batch_skips_stories_without_projected_work_items():
+    repository = InMemoryControlPlaneRepository(
+        work_items=[
+            _work_item(
+                "issue-801",
                 story_issue_number=42,
                 planned_paths=("tests/story_42_test.py",),
             ),

@@ -1,4 +1,4 @@
-from stardrifter_orchestration_mvp.operator_cli import main
+from taskplane.operator_cli import main
 
 
 def test_operator_cli_dispatches_list_subcommand_and_forwards_args():

@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from stardrifter_orchestration_mvp.models import VerificationEvidence, WorkItem
-from stardrifter_orchestration_mvp.repository import InMemoryControlPlaneRepository
-from stardrifter_orchestration_mvp.worker import (
+from taskplane.models import VerificationEvidence, WorkItem
+from taskplane.repository import InMemoryControlPlaneRepository
+from taskplane.worker import (
     _build_execution_context,
     _run_verifier_with_context,
 )

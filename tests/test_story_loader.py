@@ -1,5 +1,5 @@
-from stardrifter_orchestration_mvp.models import WorkItem
-from stardrifter_orchestration_mvp.story_runner import load_story_work_item_ids
+from taskplane.models import WorkItem
+from taskplane.story_runner import load_story_work_item_ids
 
 
 class FakeRepository:

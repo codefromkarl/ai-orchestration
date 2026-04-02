@@ -4,7 +4,7 @@ import json
 import pytest
 from typing import Any
 
-from stardrifter_orchestration_mvp.execution_protocol import (
+from taskplane.execution_protocol import (
     EXECUTION_CHECKPOINT_MARKER,
     EXECUTION_RESULT_MARKER,
     EXECUTION_WAIT_MARKER,
@@ -12,15 +12,15 @@ from stardrifter_orchestration_mvp.execution_protocol import (
     validate_checkpoint_payload,
     validate_wait_payload,
 )
-from stardrifter_orchestration_mvp.executor_adapter import parse_executor_output
-from stardrifter_orchestration_mvp.policy_engine import evaluate_policy
-from stardrifter_orchestration_mvp.session_manager import InMemorySessionManager
-from stardrifter_orchestration_mvp.session_runtime_loop import (
+from taskplane.executor_adapter import parse_executor_output
+from taskplane.policy_engine import evaluate_policy
+from taskplane.session_manager import InMemorySessionManager
+from taskplane.session_runtime_loop import (
     ExecutorResult,
     fire_wakeup_for_event,
     run_session_to_completion,
 )
-from stardrifter_orchestration_mvp.wakeup_dispatcher import InMemoryWakeupDispatcher
+from taskplane.wakeup_dispatcher import InMemoryWakeupDispatcher
 
 from session_fixtures import (
     PATTERN_ALL_CHECKPOINTS,

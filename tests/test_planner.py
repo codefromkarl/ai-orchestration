@@ -1,5 +1,5 @@
-from stardrifter_orchestration_mvp.models import WorkDependency, WorkItem
-from stardrifter_orchestration_mvp.planner import derive_ready_work_ids
+from taskplane.models import WorkDependency, WorkItem
+from taskplane.planner import derive_ready_work_ids
 
 
 def test_derive_ready_work_ids_only_returns_pending_items_with_completed_dependencies():

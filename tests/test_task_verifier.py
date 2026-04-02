@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from stardrifter_orchestration_mvp.task_verifier import (
+from taskplane.task_verifier import (
     _build_verifier_env,
     _extract_explicit_commands,
     _extract_pytest_targets_from_changed_paths,
@@ -73,7 +73,7 @@ def test_extract_pytest_targets_from_changed_paths_prefers_changed_test_files(
     tests_dir.mkdir(parents=True)
     (tests_dir / "test_csv_parser.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
     monkeypatch.setenv(
-        "STARDRIFTER_EXECUTION_CHANGED_PATHS_JSON",
+        "TASKPLANE_EXECUTION_CHANGED_PATHS_JSON",
         '["tests/unit/test_csv_parser.py"]',
     )
 
@@ -89,13 +89,51 @@ def test_extract_pytest_targets_from_changed_paths_infers_unit_test_from_source_
     tests_dir.mkdir(parents=True)
     (tests_dir / "test_csv_parser.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
     monkeypatch.setenv(
-        "STARDRIFTER_EXECUTION_CHANGED_PATHS_JSON",
+        "TASKPLANE_EXECUTION_CHANGED_PATHS_JSON",
         '["src/stardrifter_engine/data_loading/csv_parser.py"]',
     )
 
     targets = _extract_pytest_targets_from_changed_paths(project_dir=tmp_path)
 
     assert targets == ["tests/unit/test_csv_parser.py"]
+
+
+def test_extract_pytest_targets_from_changed_paths_infers_godot_runtime_test_from_runner(
+    tmp_path, monkeypatch
+):
+    runtime_dir = tmp_path / "tests" / "integration" / "godot_runtime"
+    runtime_dir.mkdir(parents=True)
+    (runtime_dir / "test_combat_command_first_manual_gate_runtime.py").write_text(
+        "def test_ok():\n    assert True\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(
+        "TASKPLANE_EXECUTION_CHANGED_PATHS_JSON",
+        '["godot/test_runners/combat_command_first_manual_gate_runner.gd"]',
+    )
+
+    targets = _extract_pytest_targets_from_changed_paths(project_dir=tmp_path)
+
+    assert targets == [
+        "tests/integration/godot_runtime/test_combat_command_first_manual_gate_runtime.py"
+    ]
+
+
+def test_resolve_verification_commands_returns_noop_for_docs_only_changed_paths(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv(
+        "TASKPLANE_EXECUTION_CHANGED_PATHS_JSON",
+        '["docs/runtime/notes.md", "README.md"]',
+    )
+
+    commands = _resolve_verification_commands(
+        title="[02-IMPL] update runtime notes for operator handoff",
+        body="## 验证方式\n\n- [ ] 更新说明文档\n",
+        project_dir=tmp_path,
+    )
+
+    assert commands == []
 
 
 def test_resolve_verification_commands_falls_back_to_focused_pytest_targets(tmp_path):
@@ -128,6 +166,138 @@ def test_resolve_verification_commands_falls_back_to_focused_pytest_targets(tmp_
             "tests/unit/test_campaign_topology_schema_closure.py",
         ]
     ]
+
+
+def test_resolve_verification_commands_infers_focused_tests_from_source_scope(
+    tmp_path,
+):
+    src_dir = tmp_path / "src" / "stardrifter_engine"
+    (src_dir / "campaign").mkdir(parents=True)
+    (src_dir / "resources").mkdir(parents=True)
+    (src_dir / "services").mkdir(parents=True)
+    (src_dir / "campaign" / "campaign_navigation_service.py").write_text(
+        "class CampaignNavigationService:\n    pass\n",
+        encoding="utf-8",
+    )
+    (src_dir / "resources" / "runtime_state.py").write_text(
+        "class RuntimeState:\n    pass\n",
+        encoding="utf-8",
+    )
+    (src_dir / "services" / "world_query_service.py").write_text(
+        "class WorldQueryService:\n    pass\n",
+        encoding="utf-8",
+    )
+
+    tests_dir = tmp_path / "tests" / "unit"
+    tests_dir.mkdir(parents=True)
+    (tests_dir / "test_campaign_navigation_foundations.py").write_text(
+        "from stardrifter_engine.campaign.campaign_navigation_service import CampaignNavigationService\n",
+        encoding="utf-8",
+    )
+    (tests_dir / "test_campaign_runtime_integration.py").write_text(
+        "from stardrifter_engine.resources.runtime_state import RuntimeState\n"
+        "from stardrifter_engine.services.world_query_service import WorldQueryService\n",
+        encoding="utf-8",
+    )
+    (tests_dir / "test_fleet_movement.py").write_text(
+        "from stardrifter_engine.resources.runtime_state import RuntimeState\n",
+        encoding="utf-8",
+    )
+    (tests_dir / "test_application_services.py").write_text(
+        "from stardrifter_engine.services.world_query_service import WorldQueryService\n",
+        encoding="utf-8",
+    )
+    (tests_dir / "test_campaign_contact_runtime.py").write_text(
+        "from stardrifter_engine.resources.runtime_state import RuntimeState\n",
+        encoding="utf-8",
+    )
+
+    commands = _resolve_verification_commands(
+        title="[02-IMPL] 实现 fleet route commitment 与 ETA 基础执行链",
+        body=(
+            "## 修改范围\n\n"
+            "- 允许修改：\n"
+            "  - src/stardrifter_engine/campaign/campaign_navigation_service.py\n"
+            "  - src/stardrifter_engine/resources/runtime_state.py\n"
+            "  - src/stardrifter_engine/services/world_query_service.py\n\n"
+            "## 验证方式\n\n"
+            "- [ ] 运行 fleet movement focused 单元测试\n"
+            "- [ ] 确认 route execution 与 ETA 计算通过\n"
+            "- [ ] 确认 state writeback 正常\n"
+        ),
+        project_dir=tmp_path,
+    )
+
+    assert commands == [
+        [
+            "python3",
+            "-m",
+            "pytest",
+            "-q",
+            "tests/unit/test_campaign_runtime_integration.py",
+            "tests/unit/test_fleet_movement.py",
+            "tests/unit/test_campaign_navigation_foundations.py",
+            "tests/unit/test_application_services.py",
+        ]
+    ]
+
+
+def test_resolve_verification_commands_infers_focused_tests_from_directory_level_pytest(
+    tmp_path,
+):
+    tests_dir = tmp_path / "tests" / "unit"
+    tests_dir.mkdir(parents=True)
+    (tests_dir / "test_json_config_loader.py").write_text(
+        "def test_json_config_loader_accepts_valid_hull():\n    assert True\n",
+        encoding="utf-8",
+    )
+    (tests_dir / "test_market_runtime.py").write_text(
+        "def test_market_runtime_bootstrap():\n    assert True\n",
+        encoding="utf-8",
+    )
+
+    commands = _resolve_verification_commands(
+        title="[07-TEST] add focused verification for hull/faction/system config validation",
+        body=(
+            "## 修改范围\n\n"
+            "- 允许修改：\n"
+            "  - tests/unit/\n"
+            "  - docs/baselines/\n\n"
+            "## 验证方式\n\n"
+            "- [ ] 运行 `python3 -m pytest -q tests/unit/`\n"
+            "- [ ] 确认 JSON validation 相关测试通过\n"
+        ),
+        project_dir=tmp_path,
+    )
+
+    assert commands == [
+        [
+            "python3",
+            "-m",
+            "pytest",
+            "-q",
+            "tests/unit/test_json_config_loader.py",
+        ]
+    ]
+
+
+def test_resolve_verification_commands_returns_noop_for_expected_red_test_task(
+    tmp_path,
+):
+    commands = _resolve_verification_commands(
+        title="[05H-TEST] Write failing test for reclaim-on-release behavior",
+        body=(
+            "## 目标\n\n"
+            "写一个可运行的失败测试，证明 reclaim-on-release 行为尚未实现。\n\n"
+            "## 验收标准 (DoD)\n\n"
+            "- [ ] 测试文件已创建\n"
+            "- [ ] 测试运行时失败（证明行为缺失）\n"
+            "- [ ] 测试名称明确描述预期行为\n"
+        ),
+        project_dir=tmp_path,
+    )
+
+    assert commands == []
 
 
 def test_build_verifier_env_prepends_src_to_pythonpath(tmp_path, monkeypatch):

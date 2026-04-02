@@ -1,9 +1,9 @@
-from stardrifter_orchestration_mvp.governance_priority_cli import main
+from taskplane.governance_priority_cli import main
 
 
 def test_governance_priority_cli_prints_recommendations(monkeypatch, capsys):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
 
@@ -74,7 +74,7 @@ def test_governance_priority_cli_prints_recommendations(monkeypatch, capsys):
 
 def test_governance_priority_cli_prints_none_sections(monkeypatch, capsys):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
 

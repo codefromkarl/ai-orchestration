@@ -1,12 +1,14 @@
 from datetime import UTC, datetime, timedelta
+import os
 from pathlib import Path
 
 import pytest
 
-from stardrifter_orchestration_mvp.git_committer import CommitResult
-from stardrifter_orchestration_mvp.guardrails import evaluate_execution_guardrails
-from stardrifter_orchestration_mvp.models import (
+from taskplane.git_committer import CommitResult
+from taskplane.guardrails import evaluate_execution_guardrails
+from taskplane.models import (
     ApprovalEvent,
+    ExecutionContext,
     ExecutionRun,
     ExecutionGuardrailContext,
     VerificationEvidence,
@@ -15,7 +17,7 @@ from stardrifter_orchestration_mvp.models import (
     WorkItem,
     WorkTarget,
 )
-from stardrifter_orchestration_mvp._worker_failure_policy import (
+from taskplane._worker_failure_policy import (
     BACKOFF_BASE_MINUTES,
     BACKOFF_MAX_MINUTES,
     _classify_execution_failure,
@@ -23,19 +25,29 @@ from stardrifter_orchestration_mvp._worker_failure_policy import (
     is_auto_resolvable_failure,
     is_human_required_failure,
 )
-from stardrifter_orchestration_mvp._worker_execution_runtime import (
+from taskplane._worker_execution_runtime import (
     _renew_claim_after_prepare,
     _run_executor_with_heartbeat,
 )
-from stardrifter_orchestration_mvp._worker_queue_preparation import (
+from taskplane._worker_queue_preparation import (
     PreflightEarlyExit,
     _prepare_worker_queue,
     _run_preflight_checks,
 )
-from stardrifter_orchestration_mvp.repository import InMemoryControlPlaneRepository
-from stardrifter_orchestration_mvp.worker import (
+from taskplane.repository import InMemoryControlPlaneRepository
+from taskplane.session_manager import InMemorySessionManager
+from taskplane.wakeup_dispatcher import InMemoryWakeupDispatcher
+from taskplane.worker import (
     ExecutionResult,
+    WorkerSessionRuntime,
+    _build_worker_resume_context_builder,
+    _build_failure_finalization,
+    _build_commit_link,
+    _build_post_verification_outcome,
+    _build_pull_request_link,
+    _build_result_payload_json,
     _build_execution_context,
+    _run_verifier_for_execution_result,
     _exclude_previously_completed_in_memory_candidates as _exclude_previously_completed_in_memory_candidates_from_worker,
     _materialize_blocked_items as _materialize_blocked_items_from_worker,
     _renew_claim_after_prepare as _renew_claim_after_prepare_from_worker,
@@ -55,8 +67,9 @@ def test_failure_policy_calculate_backoff_uses_expected_exponential_schedule():
 def test_failure_policy_classifies_auto_resolvable_and_human_required_reasons():
     assert is_auto_resolvable_failure("timeout") is True
     assert is_auto_resolvable_failure("paused_for_input: waiting on next step") is True
-    assert is_auto_resolvable_failure("missing-terminal-payload") is True
-    assert is_auto_resolvable_failure("multiple-terminal-payloads") is True
+    assert is_auto_resolvable_failure("missing-terminal-payload") is False
+    assert is_auto_resolvable_failure("multiple-terminal-payloads") is False
+    assert is_auto_resolvable_failure("contextweaver-index-failed") is False
     assert is_auto_resolvable_failure("tooling_error") is False
 
     assert is_human_required_failure("credential_required") is True
@@ -150,13 +163,34 @@ def test_failure_policy_keeps_non_recoverable_failure_blocked_without_retry_trac
     )
 
 
+def test_failure_policy_treats_protocol_errors_as_blocked_without_retry_metadata():
+    result = _classify_execution_failure(
+        ExecutionResult(
+            success=False,
+            summary="multiple terminal payloads",
+            blocked_reason="multiple-terminal-payloads",
+        ),
+        attempt_count=2,
+    )
+
+    assert result == (
+        "blocked",
+        "multiple-terminal-payloads",
+        False,
+        None,
+        None,
+        None,
+        None,
+    )
+
+
 def test_worker_runtime_reexports_helpers_from_worker_module():
     assert _renew_claim_after_prepare_from_worker is _renew_claim_after_prepare
     assert _run_executor_with_heartbeat_from_worker is _run_executor_with_heartbeat
 
 
 def test_worker_reexports_queue_preparation_helpers_from_worker_module():
-    from stardrifter_orchestration_mvp._worker_queue_preparation import (
+    from taskplane._worker_queue_preparation import (
         _exclude_previously_completed_in_memory_candidates,
         _materialize_blocked_items,
         _run_preflight_checks,
@@ -168,6 +202,79 @@ def test_worker_reexports_queue_preparation_helpers_from_worker_module():
         is _exclude_previously_completed_in_memory_candidates
     )
     assert _materialize_blocked_items_from_worker is _materialize_blocked_items
+
+
+def test_run_worker_cycle_prewarms_story_workspace_before_claim(tmp_path):
+    call_order: list[str] = []
+
+    class ClaimAssertingRepository(InMemoryControlPlaneRepository):
+        def claim_next_executable_work_item(self, **kwargs):
+            assert call_order == ["prewarm"]
+            return super().claim_next_executable_work_item(**kwargs)
+
+    repository = ClaimAssertingRepository(
+        work_items=[
+            WorkItem(
+                id="task-120",
+                title="story prewarm",
+                lane="Lane 01",
+                wave="wave-1",
+                status="pending",
+                source_issue_number=120,
+                canonical_story_issue_number=42,
+                planned_paths=("src/story.py",),
+            )
+        ],
+        dependencies=[],
+        targets_by_work_id={},
+    )
+    context = ExecutionGuardrailContext(
+        allowed_waves={"wave-1"},
+        frozen_prefixes=("docs/authority/",),
+    )
+
+    class PrewarmingWorkspaceManager:
+        repo_root = Path("/repo/root")
+        worktree_root = tmp_path
+
+        def prewarm(self, *, work_items):
+            assert [item.id for item in work_items] == ["task-120"]
+            call_order.append("prewarm")
+            return [tmp_path / "story-42"]
+
+        def prepare(self, *, work_item, worker_name, repository):
+            del worker_name, repository
+            call_order.append("prepare")
+            return tmp_path / f"{work_item.id}-workspace"
+
+        def release(self, *, work_item, repository):
+            del work_item
+            call_order.append("release")
+            repository.delete_work_claim("task-120")
+
+    def verifier(work_item, workspace_path=None):
+        del workspace_path
+        return VerificationEvidence(
+            work_id=work_item.id,
+            check_type="noop",
+            command="noop",
+            passed=True,
+            output_digest="ok",
+        )
+
+    result = run_worker_cycle(
+        repository=repository,
+        context=context,
+        worker_name="worker-a",
+        executor=lambda work_item, workspace_path=None: ExecutionResult(
+            success=True, summary=f"done:{work_item.id}:{workspace_path}"
+        ),
+        verifier=verifier,
+        workspace_manager=PrewarmingWorkspaceManager(),
+    )
+
+    assert result.claimed_work_id == "task-120"
+    assert call_order == ["prewarm", "prepare", "release"]
 
 
 def test_prepare_worker_queue_preserves_preflight_and_queue_behavior_before_claim():
@@ -251,6 +358,677 @@ def test_prepare_worker_queue_preserves_preflight_and_queue_behavior_before_clai
     assert "task-queue-3" in prepared.evaluation.blocked_by_id
     assert repository.work_items_by_id["task-queue-3"].status == "blocked"
     assert repository.work_items_by_id["task-queue-3"].blocked_reason is not None
+
+
+def test_run_worker_cycle_marks_already_satisfied_done_after_verification():
+    repository = InMemoryControlPlaneRepository(
+        work_items=[
+            WorkItem(
+                id="issue-88",
+                title="preexisting implementation",
+                lane="Lane 02",
+                wave="wave-2",
+                status="ready",
+                repo="codefromkarl/stardrifter",
+                source_issue_number=88,
+            )
+        ],
+        dependencies=[],
+        targets_by_work_id={
+            "issue-88": [
+                WorkTarget(
+                    work_id="issue-88",
+                    target_path="src/runtime.py",
+                    target_type="file",
+                    owner_lane="Lane 02",
+                    is_frozen=False,
+                    requires_human_approval=False,
+                )
+            ]
+        },
+    )
+    context = ExecutionGuardrailContext(
+        allowed_waves={"wave-2"},
+        frozen_prefixes=("docs/authority/",),
+    )
+
+    result = run_worker_cycle(
+        repository=repository,
+        context=context,
+        worker_name="worker-a",
+        executor=lambda work_item, workspace_path=None, execution_context=None: ExecutionResult(
+            success=True,
+            summary="already satisfied",
+            result_payload_json={
+                "outcome": "already_satisfied",
+                "summary": "already satisfied",
+            },
+        ),
+        verifier=lambda work_item, workspace_path=None, execution_context=None: VerificationEvidence(
+            work_id=work_item.id,
+            check_type="pytest",
+            command="pytest -q",
+            passed=True,
+            output_digest="ok",
+        ),
+        committer=None,
+    )
+
+    assert result.claimed_work_id == "issue-88"
+    assert repository.get_work_item("issue-88").status == "done"
+    assert repository.verification_evidence[-1].passed is True
+
+
+def test_worker_build_result_payload_json_embeds_commit_metadata_and_preexisting_mode():
+    payload = _build_result_payload_json(
+        execution_result=ExecutionResult(
+            success=True,
+            summary="already there",
+            result_payload_json={"outcome": "already_satisfied"},
+        ),
+        commit_result=CommitResult(
+            committed=True,
+            commit_sha="abc123",
+            blocked_reason=None,
+            summary="committed",
+            commit_message="chore(task-1): complete task #1",
+        ),
+        already_satisfied=True,
+        verification_passed=True,
+    )
+
+    assert payload == {
+        "outcome": "already_satisfied",
+        "commit": {
+            "committed": True,
+            "commit_sha": "abc123",
+            "commit_message": "chore(task-1): complete task #1",
+            "summary": "committed",
+            "blocked_reason": None,
+        },
+        "completion_mode": "preexisting_state",
+    }
+
+
+def test_worker_build_pull_request_link_requires_work_item_identity_and_payload_fields():
+    work_item = WorkItem(
+        id="task-1",
+        title="task",
+        lane="Lane 01",
+        wave="wave-1",
+        status="done",
+        repo="codefromkarl/stardrifter",
+        source_issue_number=11,
+    )
+
+    assert _build_pull_request_link(
+        work_item=work_item,
+        result_payload_json={"pull_request": {"pull_number": 81, "pull_url": "https://example/pull/81"}},
+    ) == {
+        "work_id": "task-1",
+        "repo": "codefromkarl/stardrifter",
+        "issue_number": 11,
+        "pull_number": 81,
+        "pull_url": "https://example/pull/81",
+    }
+
+    assert _build_pull_request_link(
+        work_item=WorkItem(
+            id="task-2",
+            title="task",
+            lane="Lane 01",
+            wave="wave-1",
+            status="done",
+        ),
+        result_payload_json={"pull_request": {"pull_number": 81, "pull_url": "https://example/pull/81"}},
+    ) is None
+
+
+def test_worker_build_commit_link_requires_committed_result_and_work_item_identity():
+    work_item = WorkItem(
+        id="task-3",
+        title="task",
+        lane="Lane 01",
+        wave="wave-1",
+        status="done",
+        repo="codefromkarl/stardrifter",
+        source_issue_number=13,
+    )
+
+    assert _build_commit_link(
+        work_item=work_item,
+        commit_result=CommitResult(
+            committed=True,
+            commit_sha="def456",
+            blocked_reason=None,
+            summary="committed",
+            commit_message="chore(task-3): complete task #3",
+        ),
+    ) == {
+        "work_id": "task-3",
+        "repo": "codefromkarl/stardrifter",
+        "issue_number": 13,
+        "commit_sha": "def456",
+        "commit_message": "chore(task-3): complete task #3",
+    }
+
+    assert _build_commit_link(
+        work_item=work_item,
+        commit_result=CommitResult(
+            committed=False,
+            commit_sha="def456",
+            blocked_reason=None,
+            summary="committed",
+            commit_message="chore(task-3): complete task #3",
+        ),
+    ) is None
+
+
+def test_worker_build_post_verification_outcome_blocks_duplicate_canonical_commit():
+    outcome = _build_post_verification_outcome(
+        verification_passed=True,
+        verification_output_digest="ok",
+        approval_required=False,
+        session_runtime_present=False,
+        already_satisfied=False,
+        existing_commit_link={"commit_sha": "abc123"},
+        commit_result=None,
+    )
+
+    assert outcome == ("blocked", "duplicate_canonical_commit", False)
+
+
+def test_worker_build_post_verification_outcome_blocks_missing_commit_evidence():
+    outcome = _build_post_verification_outcome(
+        verification_passed=True,
+        verification_output_digest="ok",
+        approval_required=False,
+        session_runtime_present=False,
+        already_satisfied=False,
+        existing_commit_link=None,
+        commit_result=CommitResult(
+            committed=False,
+            commit_sha=None,
+            blocked_reason=None,
+            summary="no commit",
+            commit_message=None,
+        ),
+    )
+
+    assert outcome == ("blocked", "missing_commit_evidence", False)
+
+
+def test_worker_build_post_verification_outcome_routes_to_awaiting_approval_when_needed():
+    outcome = _build_post_verification_outcome(
+        verification_passed=True,
+        verification_output_digest="ok",
+        approval_required=True,
+        session_runtime_present=False,
+        already_satisfied=False,
+        existing_commit_link=None,
+        commit_result=None,
+    )
+
+    assert outcome == ("awaiting_approval", None, True)
+
+
+def test_worker_build_failure_finalization_requeues_timeout_with_retry_metadata():
+    finalization = _build_failure_finalization(
+        claimed_work_id="task-1",
+        worker_name="worker-a",
+        execution_result=ExecutionResult(
+            success=False,
+            summary="executor timed out",
+            blocked_reason="timeout",
+            command_digest="exec",
+            exit_code=124,
+            elapsed_ms=1000,
+        ),
+        current_attempt_count=0,
+        branch_name="branch-1",
+    )
+
+    assert finalization["status"] == "pending"
+    assert finalization["blocked_reason"] is None
+    assert finalization["decision_required"] is False
+    assert finalization["attempt_count"] == 1
+    assert finalization["last_failure_reason"] == "timeout"
+    assert finalization["next_eligible_at"] is not None
+    assert finalization["execution_run"].status == "blocked"
+
+
+def test_worker_build_failure_finalization_marks_needs_decision_for_human_review():
+    finalization = _build_failure_finalization(
+        claimed_work_id="task-2",
+        worker_name="worker-a",
+        execution_result=ExecutionResult(
+            success=False,
+            summary="needs human",
+            blocked_reason="missing-approval",
+            decision_required=True,
+            result_payload_json={
+                "outcome": "needs_decision",
+                "reason_code": "missing-approval",
+            },
+        ),
+        current_attempt_count=2,
+        branch_name=None,
+    )
+
+    assert finalization["status"] == "blocked"
+    assert finalization["blocked_reason"] == "missing-approval"
+    assert finalization["decision_required"] is True
+    assert finalization["attempt_count"] == 2
+    assert finalization["last_failure_reason"] is None
+    assert finalization["next_eligible_at"] is None
+
+
+def test_worker_build_failure_finalization_keeps_tooling_error_blocked_without_retry_tracking():
+    finalization = _build_failure_finalization(
+        claimed_work_id="task-3",
+        worker_name="worker-a",
+        execution_result=ExecutionResult(
+            success=False,
+            summary="tooling exploded",
+            blocked_reason="tooling_error",
+            result_payload_json={"reason_code": "tooling_error"},
+        ),
+        current_attempt_count=4,
+        branch_name="branch-3",
+    )
+
+    assert finalization["status"] == "blocked"
+    assert finalization["blocked_reason"] == "tooling_error"
+    assert finalization["decision_required"] is False
+    assert finalization["attempt_count"] == 4
+    assert finalization["last_failure_reason"] is None
+    assert finalization["next_eligible_at"] is None
+    assert finalization["execution_run"].branch_name == "branch-3"
+
+
+def test_worker_run_verifier_for_execution_result_sets_and_restores_changed_paths_env(monkeypatch):
+    monkeypatch.setenv(
+        "TASKPLANE_EXECUTION_CHANGED_PATHS_JSON",
+        '["preexisting/path.py"]',
+    )
+    work_item = WorkItem(
+        id="task-4",
+        title="task",
+        lane="Lane 01",
+        wave="wave-1",
+        status="in_progress",
+    )
+    execution_context = ExecutionContext(
+        work_id="task-4",
+        title="task",
+        lane="Lane 01",
+        wave="wave-1",
+    )
+    captured: dict[str, str | None] = {}
+
+    def verifier(work_item, workspace_path=None, execution_context=None):
+        del work_item, workspace_path, execution_context
+        captured["during"] = os.environ.get("TASKPLANE_EXECUTION_CHANGED_PATHS_JSON")
+        return VerificationEvidence(
+            work_id="task-4",
+            check_type="pytest",
+            command="pytest -q",
+            passed=True,
+            output_digest="ok",
+        )
+
+    verification = _run_verifier_for_execution_result(
+        verifier=verifier,
+        work_item=work_item,
+        workspace_path=None,
+        execution_context=execution_context,
+        execution_result=ExecutionResult(
+            success=True,
+            summary="done",
+            result_payload_json={
+                "changed_paths": ["src/runtime.py", "tests/test_runtime.py"],
+            },
+        ),
+    )
+
+    assert verification.passed is True
+    assert (
+        captured["during"]
+        == '["src/runtime.py", "tests/test_runtime.py"]'
+    )
+    assert (
+        os.environ.get("TASKPLANE_EXECUTION_CHANGED_PATHS_JSON")
+        == '["preexisting/path.py"]'
+    )
+
+
+def test_run_worker_cycle_accepts_explicit_executor_verifier_and_writeback_objects():
+    repository = InMemoryControlPlaneRepository(
+        work_items=[
+            WorkItem(
+                id="issue-101",
+                title="explicit protocol objects",
+                lane="Lane 02",
+                wave="wave-2",
+                status="ready",
+                repo="codefromkarl/stardrifter",
+                source_issue_number=101,
+            )
+        ],
+        dependencies=[],
+        targets_by_work_id={
+            "issue-101": [
+                WorkTarget(
+                    work_id="issue-101",
+                    target_path="src/runtime.py",
+                    target_type="file",
+                    owner_lane="Lane 02",
+                    is_frozen=False,
+                    requires_human_approval=False,
+                )
+            ]
+        },
+    )
+    context = ExecutionGuardrailContext(
+        allowed_waves={"wave-2"},
+        frozen_prefixes=("docs/authority/",),
+    )
+    writes: list[dict[str, object]] = []
+
+    class ExplicitExecutor:
+        def execute(
+            self,
+            *,
+            work_item: WorkItem,
+            workspace_path=None,
+            execution_context=None,
+            heartbeat=None,
+        ) -> ExecutionResult:
+            del workspace_path, execution_context
+            if heartbeat is not None:
+                heartbeat()
+            return ExecutionResult(success=True, summary=f"done:{work_item.id}")
+
+    class ExplicitVerifier:
+        def verify(
+            self,
+            *,
+            work_item: WorkItem,
+            workspace_path=None,
+            execution_context=None,
+        ) -> VerificationEvidence:
+            del workspace_path, execution_context
+            return VerificationEvidence(
+                work_id=work_item.id,
+                check_type="pytest",
+                command="pytest -q",
+                passed=True,
+                output_digest="ok",
+            )
+
+    class ExplicitWriteback:
+        def write_back(
+            self,
+            *,
+            repo: str,
+            issue_number: int,
+            status: str,
+            decision_required: bool = False,
+        ) -> None:
+            writes.append(
+                {
+                    "repo": repo,
+                    "issue_number": issue_number,
+                    "status": status,
+                    "decision_required": decision_required,
+                }
+            )
+
+    result = run_worker_cycle(
+        repository=repository,
+        context=context,
+        worker_name="worker-a",
+        executor=ExplicitExecutor(),
+        verifier=ExplicitVerifier(),
+        github_writeback=ExplicitWriteback(),
+        committer=None,
+    )
+
+    assert result.claimed_work_id == "issue-101"
+    assert repository.get_work_item("issue-101").status == "done"
+    assert writes == [
+        {
+            "repo": "codefromkarl/stardrifter",
+            "issue_number": 101,
+            "status": "done",
+            "decision_required": False,
+        }
+    ]
+
+
+def test_run_worker_cycle_drives_checkpoint_session_to_terminal_result():
+    repository = InMemoryControlPlaneRepository(
+        work_items=[
+            WorkItem(
+                id="issue-89",
+                title="checkpointed task",
+                lane="Lane 02",
+                wave="wave-2",
+                status="ready",
+                repo="codefromkarl/stardrifter",
+                source_issue_number=89,
+            )
+        ],
+        dependencies=[],
+        targets_by_work_id={
+            "issue-89": [
+                WorkTarget(
+                    work_id="issue-89",
+                    target_path="src/runtime.py",
+                    target_type="file",
+                    owner_lane="Lane 02",
+                    is_frozen=False,
+                    requires_human_approval=False,
+                )
+            ]
+        },
+    )
+    context = ExecutionGuardrailContext(
+        allowed_waves={"wave-2"},
+        frozen_prefixes=("docs/authority/",),
+    )
+    calls: list[str] = []
+
+    def executor(work_item, workspace_path=None, execution_context=None):
+        calls.append(execution_context.resume_context or "")
+        if len(calls) == 1:
+            return ExecutionResult(
+                success=True,
+                summary="checkpoint",
+                result_payload_json={
+                    "execution_kind": "checkpoint",
+                    "phase": "implementing",
+                    "summary": "completed step 1",
+                },
+            )
+        return ExecutionResult(
+            success=True,
+            summary="done",
+            result_payload_json={
+                "outcome": "done",
+                "summary": "finished",
+                "changed_paths": ["src/runtime.py"],
+            },
+        )
+
+    result = run_worker_cycle(
+        repository=repository,
+        context=context,
+        worker_name="worker-a",
+        executor=executor,
+        verifier=lambda work_item, workspace_path=None, execution_context=None: VerificationEvidence(
+            work_id=work_item.id,
+            check_type="pytest",
+            command="pytest -q",
+            passed=True,
+            output_digest="ok",
+        ),
+        committer=None,
+        session_runtime=True,
+    )
+
+    assert result.claimed_work_id == "issue-89"
+    assert repository.get_work_item("issue-89").status == "done"
+    assert len(calls) == 2
+    assert "completed step 1" in calls[1]
+
+
+def test_run_worker_cycle_uses_runtime_resume_context_builder_for_followup_turns():
+    repository = InMemoryControlPlaneRepository(
+        work_items=[
+            WorkItem(
+                id="issue-90",
+                title="store-backed resume context",
+                lane="Lane 02",
+                wave="wave-2",
+                status="ready",
+                repo="codefromkarl/stardrifter",
+                source_issue_number=90,
+            )
+        ],
+        dependencies=[],
+        targets_by_work_id={
+            "issue-90": [
+                WorkTarget(
+                    work_id="issue-90",
+                    target_path="src/runtime.py",
+                    target_type="file",
+                    owner_lane="Lane 02",
+                    is_frozen=False,
+                    requires_human_approval=False,
+                )
+            ]
+        },
+    )
+    context = ExecutionGuardrailContext(
+        allowed_waves={"wave-2"},
+        frozen_prefixes=("docs/authority/",),
+    )
+    runtime_manager = InMemorySessionManager()
+    runtime = WorkerSessionRuntime(
+        session_manager=runtime_manager,
+        wakeup_dispatcher=InMemoryWakeupDispatcher(),
+        resume_context_builder=lambda session: (
+            "Summary:\nstore-backed"
+            if runtime_manager.get_latest_checkpoint(session.id) is None
+            else "Summary:\nstore-backed after checkpoint"
+        ),
+    )
+    calls: list[str] = []
+
+    def executor(work_item, workspace_path=None, execution_context=None):
+        calls.append(execution_context.resume_context or "")
+        if len(calls) == 1:
+            return ExecutionResult(
+                success=True,
+                summary="checkpoint",
+                result_payload_json={
+                    "execution_kind": "checkpoint",
+                    "phase": "implementing",
+                    "summary": "completed step 1",
+                },
+            )
+        return ExecutionResult(
+            success=True,
+            summary="done",
+            result_payload_json={
+                "outcome": "done",
+                "summary": "finished",
+                "changed_paths": ["src/runtime.py"],
+            },
+        )
+
+    result = run_worker_cycle(
+        repository=repository,
+        context=context,
+        worker_name="worker-a",
+        executor=executor,
+        verifier=lambda work_item, workspace_path=None, execution_context=None: VerificationEvidence(
+            work_id=work_item.id,
+            check_type="pytest",
+            command="pytest -q",
+            passed=True,
+            output_digest="ok",
+        ),
+        committer=None,
+        session_runtime=runtime,
+    )
+
+    assert result.claimed_work_id == "issue-90"
+    assert repository.get_work_item("issue-90").status == "done"
+    assert calls == [
+        "Summary:\nstore-backed",
+        "Summary:\nstore-backed after checkpoint",
+    ]
+
+
+def test_build_worker_resume_context_builder_uses_context_and_artifact_stores(
+    monkeypatch,
+):
+    looked_up: list[tuple[str, int]] = []
+
+    from taskplane.artifact_store import ArtifactRecord, ArtifactStore
+    from taskplane.context_store import ContextStore
+
+    def fake_lookup(self, *, work_id: str, artifact_type=None, limit: int = 50):
+        looked_up.append((work_id, limit))
+        return [
+            ArtifactRecord(
+                id=1,
+                work_id=work_id,
+                artifact_type="task_summary",
+                artifact_key=f"{work_id}/task_summary/01.json",
+                storage_path=f"/tmp/{work_id}.json",
+                content_digest="abc123",
+                content_size_bytes=32,
+                mime_type="application/json",
+                metadata={"summary": "artifact summary"},
+            )
+        ]
+
+    def fake_build_resume_context(
+        self,
+        work_id: str,
+        *,
+        artifacts=None,
+        max_chars: int = 2000,
+    ) -> str:
+        assert work_id == "issue-91"
+        assert artifacts is not None
+        assert max_chars == 1600
+        return "Summary:\nconversation summary\n\nArtifacts:\n- artifact summary"
+
+    monkeypatch.setattr(ArtifactStore, "lookup", fake_lookup)
+    monkeypatch.setattr(ContextStore, "build_resume_context", fake_build_resume_context)
+
+    runtime_manager = InMemorySessionManager()
+    session = runtime_manager.create_session(
+        work_id="issue-91",
+        context_summary="fallback session summary",
+    )
+
+    builder = _build_worker_resume_context_builder(
+        dsn="postgresql://example",
+        session_manager=runtime_manager,
+    )
+
+    assert builder is not None
+    text = builder(session)
+    assert looked_up == [("issue-91", 6)]
+    assert "Session state:" in text
+    assert "fallback session summary" in text
+    assert "Conversation context:" in text
+    assert "conversation summary" in text
 
 
 def test_run_preflight_checks_returns_internal_early_exit_shape_for_missing_issue_identity():
@@ -563,7 +1341,7 @@ def test_run_worker_cycle_claims_executes_verifies_and_marks_done():
 
     def verifier(work_item: WorkItem, workspace_path=None):
         assert work_item.id == "task-2"
-        from stardrifter_orchestration_mvp.models import VerificationEvidence
+        from taskplane.models import VerificationEvidence
 
         return VerificationEvidence(
             work_id=work_item.id,
@@ -665,7 +1443,7 @@ def test_run_worker_cycle_passes_execution_context_to_executor_and_verifier(tmp_
 
     def verifier(work_item, workspace_path=None, execution_context=None):
         captured["verifier_context"] = execution_context
-        from stardrifter_orchestration_mvp.models import VerificationEvidence
+        from taskplane.models import VerificationEvidence
 
         return VerificationEvidence(
             work_id=work_item.id,
@@ -883,7 +1661,7 @@ def test_run_worker_cycle_allows_file_task_without_planned_paths_under_current_p
         frozen_prefixes=("docs/authority/",),
     )
 
-    from stardrifter_orchestration_mvp.models import VerificationEvidence
+    from taskplane.models import VerificationEvidence
 
     result = run_worker_cycle(
         repository=repository,
@@ -1125,7 +1903,7 @@ def test_run_worker_cycle_requeues_timeout_failure_as_ready():
     assert repository.execution_runs[0].summary == "executor timed out"
 
 
-def test_run_worker_cycle_requeues_invalid_result_payload_failure_as_ready():
+def test_run_worker_cycle_blocks_invalid_result_payload_failure():
     repository = InMemoryControlPlaneRepository(
         work_items=[
             WorkItem(
@@ -1170,13 +1948,10 @@ def test_run_worker_cycle_requeues_invalid_result_payload_failure_as_ready():
     )
 
     assert result.claimed_work_id == "task-38"
-    assert repository.work_items_by_id["task-38"].status == "pending"
-    assert repository.work_items_by_id["task-38"].blocked_reason is None
-    assert repository.work_items_by_id["task-38"].attempt_count == 1
-    assert (
-        repository.work_items_by_id["task-38"].last_failure_reason
-        == "invalid-result-payload"
-    )
+    assert repository.work_items_by_id["task-38"].status == "blocked"
+    assert repository.work_items_by_id["task-38"].blocked_reason == "invalid-result-payload"
+    assert repository.work_items_by_id["task-38"].attempt_count == 0
+    assert repository.work_items_by_id["task-38"].last_failure_reason is None
 
 
 def test_run_worker_cycle_keeps_timeout_retry_as_fresh_session_policy():
@@ -1491,7 +2266,7 @@ def test_run_worker_cycle_keeps_verification_failure_blocked():
         frozen_prefixes=("docs/authority/",),
     )
 
-    from stardrifter_orchestration_mvp.models import VerificationEvidence
+    from taskplane.models import VerificationEvidence
 
     result = run_worker_cycle(
         repository=repository,
@@ -1545,7 +2320,7 @@ def test_run_worker_cycle_blocks_when_auto_commit_is_unsafe():
         frozen_prefixes=("docs/authority/",),
     )
 
-    from stardrifter_orchestration_mvp.models import VerificationEvidence
+    from taskplane.models import VerificationEvidence
 
     result = run_worker_cycle(
         repository=repository,
@@ -1629,7 +2404,7 @@ def test_run_worker_cycle_blocks_duplicate_canonical_commit():
         frozen_prefixes=("docs/authority/",),
     )
 
-    from stardrifter_orchestration_mvp.models import VerificationEvidence
+    from taskplane.models import VerificationEvidence
 
     result = run_worker_cycle(
         repository=repository,
@@ -1699,7 +2474,7 @@ def test_run_worker_cycle_syncs_done_status_to_github_after_finalization():
         frozen_prefixes=("docs/authority/",),
     )
 
-    from stardrifter_orchestration_mvp.models import VerificationEvidence
+    from taskplane.models import VerificationEvidence
 
     result = run_worker_cycle(
         repository=repository,
@@ -1762,7 +2537,7 @@ def test_run_worker_cycle_records_pull_request_link_when_commit_payload_provides
         frozen_prefixes=("docs/authority/",),
     )
 
-    from stardrifter_orchestration_mvp.models import VerificationEvidence
+    from taskplane.models import VerificationEvidence
 
     result = run_worker_cycle(
         repository=repository,
@@ -1858,7 +2633,7 @@ def test_run_worker_cycle_syncs_blocked_needs_decision_to_github():
     ]
 
 
-def test_run_worker_cycle_blocks_already_satisfied_without_commit_evidence():
+def test_run_worker_cycle_verifies_already_satisfied_without_commit_evidence():
     repository = InMemoryControlPlaneRepository(
         work_items=[
             WorkItem(
@@ -1903,30 +2678,35 @@ def test_run_worker_cycle_blocks_already_satisfied_without_commit_evidence():
                 "changed_paths": [],
             },
         ),
-        verifier=lambda work_item, workspace_path=None: verifier_calls.append(
-            work_item.id
-        ),  # type: ignore[return-value]
+        verifier=lambda work_item, workspace_path=None: (
+            verifier_calls.append(work_item.id),
+            VerificationEvidence(
+                work_id=work_item.id,
+                check_type="pytest",
+                command="pytest -q",
+                passed=True,
+                output_digest="ok",
+            ),
+        )[1],
         committer=lambda work_item, execution_result, workspace_path=None: (
             commit_calls.append(work_item.id)
         ),  # type: ignore[return-value]
     )
 
     assert result.claimed_work_id == "task-6"
-    assert repository.work_items_by_id["task-6"].status == "blocked"
-    assert (
-        repository.work_items_by_id["task-6"].blocked_reason
-        == "already_satisfied_without_commit_evidence"
-    )
-    assert repository.work_items_by_id["task-6"].decision_required is True
-    assert verifier_calls == []
+    assert repository.work_items_by_id["task-6"].status == "done"
+    assert repository.work_items_by_id["task-6"].blocked_reason is None
+    assert repository.work_items_by_id["task-6"].decision_required is False
+    assert verifier_calls == ["task-6"]
     assert commit_calls == []
-    assert repository.execution_runs[0].status == "blocked"
+    assert repository.execution_runs[0].status == "done"
     assert repository.execution_runs[0].result_payload_json == {
         "outcome": "already_satisfied",
         "reason_code": "already_has_backend_skeleton",
         "changed_paths": [],
+        "completion_mode": "preexisting_state",
     }
-    assert repository.verification_evidence == []
+    assert repository.verification_evidence[0].passed is True
 
 
 def test_run_worker_cycle_allows_already_satisfied_with_existing_commit_evidence():
@@ -1981,8 +2761,12 @@ def test_run_worker_cycle_allows_already_satisfied_with_existing_commit_evidence
                 "changed_paths": [],
             },
         ),
-        verifier=lambda work_item, workspace_path=None: (_ for _ in ()).throw(
-            AssertionError("verifier should not run for already_satisfied")
+        verifier=lambda work_item, workspace_path=None: VerificationEvidence(
+            work_id=work_item.id,
+            check_type="pytest",
+            command="pytest -q",
+            passed=True,
+            output_digest="ok",
         ),
     )
 
@@ -1990,6 +2774,7 @@ def test_run_worker_cycle_allows_already_satisfied_with_existing_commit_evidence
     assert repository.work_items_by_id["task-6b"].status == "done"
     assert repository.work_items_by_id["task-6b"].blocked_reason is None
     assert repository.execution_runs[0].status == "done"
+    assert repository.verification_evidence[0].passed is True
 
 
 def test_run_worker_cycle_blocks_when_committer_returns_uncommitted_without_reason():
@@ -2097,7 +2882,7 @@ def test_run_worker_cycle_creates_and_releases_work_claim_with_workspace_path(tm
 
     def verifier(work_item, workspace_path=None):
         calls["verifier_path"] = workspace_path
-        from stardrifter_orchestration_mvp.models import VerificationEvidence
+        from taskplane.models import VerificationEvidence
 
         return VerificationEvidence(
             work_id=work_item.id,
@@ -2167,7 +2952,7 @@ def test_run_worker_cycle_renews_claim_after_workspace_prepare(tmp_path):
             repository.delete_work_claim(work_item.id)
 
     def verifier(work_item, workspace_path=None):
-        from stardrifter_orchestration_mvp.models import VerificationEvidence
+        from taskplane.models import VerificationEvidence
 
         return VerificationEvidence(
             work_id=work_item.id,
@@ -2241,7 +3026,7 @@ def test_run_worker_cycle_renews_claim_multiple_times_during_long_executor(tmp_p
         return ExecutionResult(success=True, summary="done")
 
     def verifier(work_item, workspace_path=None):
-        from stardrifter_orchestration_mvp.models import VerificationEvidence
+        from taskplane.models import VerificationEvidence
 
         return VerificationEvidence(
             work_id=work_item.id,
@@ -2316,7 +3101,7 @@ def test_run_worker_cycle_claims_second_candidate_when_repository_rejects_first(
 
     def verifier(work_item, workspace_path=None):
         verifier_calls.append(work_item.id)
-        from stardrifter_orchestration_mvp.models import VerificationEvidence
+        from taskplane.models import VerificationEvidence
 
         return VerificationEvidence(
             work_id=work_item.id,
@@ -2377,7 +3162,7 @@ def test_run_worker_cycle_records_claim_before_workspace_prepare(tmp_path):
             repository.delete_work_claim(work_item.id)
 
     def verifier(work_item, workspace_path=None):
-        from stardrifter_orchestration_mvp.models import VerificationEvidence
+        from taskplane.models import VerificationEvidence
 
         return VerificationEvidence(
             work_id=work_item.id,
@@ -2510,7 +3295,7 @@ def test_run_worker_cycle_prefers_active_work_items_view_when_repository_support
             or ExecutionResult(success=True, summary="done")
         ),
         verifier=lambda work_item, workspace_path=None: __import__(
-            "stardrifter_orchestration_mvp.models", fromlist=["VerificationEvidence"]
+            "taskplane.models", fromlist=["VerificationEvidence"]
         ).VerificationEvidence(
             work_id=work_item.id,
             check_type="noop",

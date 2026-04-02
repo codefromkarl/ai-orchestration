@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from stardrifter_orchestration_mvp.models import ExecutionSession
-from stardrifter_orchestration_mvp.session_manager import InMemorySessionManager
-from stardrifter_orchestration_mvp.session_runtime_loop import (
+from taskplane.models import ExecutionSession
+from taskplane.session_manager import InMemorySessionManager
+from taskplane.session_runtime_loop import (
     ExecutorResult,
     SessionCompletionResult,
     run_session_to_completion,
 )
-from stardrifter_orchestration_mvp.wakeup_dispatcher import InMemoryWakeupDispatcher
+from taskplane.wakeup_dispatcher import InMemoryWakeupDispatcher
 
 
 def setup_session_pair(

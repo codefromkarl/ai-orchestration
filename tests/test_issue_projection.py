@@ -1,9 +1,9 @@
-from stardrifter_orchestration_mvp.github_importer import (
+from taskplane.github_importer import (
     build_completion_audit,
     extract_relation_candidates,
     normalize_github_issue,
 )
-from stardrifter_orchestration_mvp.issue_projection import (
+from taskplane.issue_projection import (
     GitHubTaskProjection,
     build_projectable_story_task_counts,
     project_github_tasks_to_work_items,

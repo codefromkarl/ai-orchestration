@@ -1,12 +1,12 @@
 from datetime import datetime, timezone
 
-from stardrifter_orchestration_mvp.models import OperatorRequest
-from stardrifter_orchestration_mvp.operator_request_report_cli import main
+from taskplane.models import OperatorRequest
+from taskplane.operator_request_report_cli import main
 
 
 def test_operator_request_report_cli_groups_open_requests_by_reason(monkeypatch, capsys):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}
@@ -80,7 +80,7 @@ def test_operator_request_report_cli_groups_open_requests_by_reason(monkeypatch,
 
 def test_operator_request_report_cli_prints_empty_state(monkeypatch, capsys):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}

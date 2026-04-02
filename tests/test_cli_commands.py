@@ -1,11 +1,11 @@
 from pathlib import Path
 
-from stardrifter_orchestration_mvp.cli import main
-from stardrifter_orchestration_mvp.models import (
+from taskplane.cli import main
+from taskplane.models import (
     ExecutionGuardrailContext,
     VerificationEvidence,
 )
-from stardrifter_orchestration_mvp.worker import ExecutionResult, WorkerCycleResult
+from taskplane.worker import ExecutionResult, WorkerCycleResult
 
 
 def _fake_executor(*args, **kwargs) -> ExecutionResult:
@@ -26,7 +26,7 @@ def test_cli_main_builds_shell_adapters_when_commands_are_provided(
     monkeypatch, tmp_path
 ):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}
@@ -34,7 +34,7 @@ def test_cli_main_builds_shell_adapters_when_commands_are_provided(
     def fake_repository_builder(*, dsn: str):
         return object()
 
-    def fake_executor_builder(*, command_template: str, workdir: Path):
+    def fake_executor_builder(*, command_template: str, workdir: Path, dsn=None):
         captured["executor_command"] = command_template
         captured["executor_workdir"] = workdir
         return _fake_executor
@@ -59,6 +59,7 @@ def test_cli_main_builds_shell_adapters_when_commands_are_provided(
         committer,
         work_item_ids=None,
         workspace_manager=None,
+        dsn=None,
     ):
         captured["executor"] = executor
         captured["verifier"] = verifier
@@ -92,7 +93,7 @@ def test_cli_main_builds_shell_adapters_when_commands_are_provided(
 
 def test_cli_main_uses_task_verifier_by_default(monkeypatch, tmp_path):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}
@@ -119,6 +120,7 @@ def test_cli_main_uses_task_verifier_by_default(monkeypatch, tmp_path):
         committer,
         work_item_ids=None,
         workspace_manager=None,
+        dsn=None,
     ):
         captured["verifier"] = verifier
         return WorkerCycleResult(claimed_work_id=None)
@@ -137,7 +139,7 @@ def test_cli_main_uses_task_verifier_by_default(monkeypatch, tmp_path):
     assert exit_code == 0
     assert (
         captured["verifier_command"]
-        == "python3 -m stardrifter_orchestration_mvp.task_verifier"
+        == "python3 -m taskplane.task_verifier"
     )
     assert captured["verifier_workdir"] == tmp_path
     assert captured["verifier_check_type"] == "pytest"
@@ -146,15 +148,15 @@ def test_cli_main_uses_task_verifier_by_default(monkeypatch, tmp_path):
 def test_story_runner_cli_builds_routed_task_executor_when_command_is_provided(
     monkeypatch, tmp_path
 ):
-    from stardrifter_orchestration_mvp.story_runner_cli import main as story_main
+    from taskplane.story_runner_cli import main as story_main
 
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}
 
-    def fake_executor_builder(*, command_template: str, workdir: Path):
+    def fake_executor_builder(*, command_template: str, workdir: Path, dsn=None):
         captured["executor_command"] = command_template
         captured["executor_workdir"] = workdir
         return _fake_executor
@@ -177,7 +179,7 @@ def test_story_runner_cli_builds_routed_task_executor_when_command_is_provided(
             "--story-issue-number",
             "130",
             "--executor-command",
-            "python3 -m stardrifter_orchestration_mvp.opencode_task_executor",
+            "python3 -m taskplane.opencode_task_executor",
             "--workdir",
             str(tmp_path),
         ],
@@ -192,6 +194,6 @@ def test_story_runner_cli_builds_routed_task_executor_when_command_is_provided(
 
     assert exit_code == 0
     assert captured["executor_command"] == (
-        "python3 -m stardrifter_orchestration_mvp.opencode_task_executor"
+        "python3 -m taskplane.opencode_task_executor"
     )
     assert captured["executor_workdir"] == tmp_path

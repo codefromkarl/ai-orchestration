@@ -1,10 +1,10 @@
-from stardrifter_orchestration_mvp.models import StoryRunResult
-from stardrifter_orchestration_mvp.story_runner_cli import main
+from taskplane.models import StoryRunResult
+from taskplane.story_runner_cli import main
 
 
 def test_story_runner_cli_loads_story_items_and_runs(monkeypatch, capsys):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}
@@ -31,6 +31,7 @@ def test_story_runner_cli_loads_story_items_and_runs(monkeypatch, capsys):
         committer,
         story_integrator=None,
         workspace_manager=None,
+        dsn=None,
     ):
         captured["worker_name"] = worker_name
         captured["story_work_item_ids"] = story_work_item_ids
@@ -71,12 +72,12 @@ def test_story_runner_cli_builds_shell_adapters_when_commands_are_provided(
     monkeypatch, tmp_path
 ):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}
 
-    def fake_executor_builder(*, command_template: str, workdir):
+    def fake_executor_builder(*, command_template: str, workdir, dsn=None):
         captured["executor_command"] = command_template
         captured["executor_workdir"] = workdir
         return "executor"
@@ -104,6 +105,7 @@ def test_story_runner_cli_builds_shell_adapters_when_commands_are_provided(
         committer,
         story_integrator=None,
         workspace_manager=None,
+        dsn=None,
     ):
         captured["executor"] = executor
         captured["verifier"] = verifier
@@ -125,9 +127,9 @@ def test_story_runner_cli_builds_shell_adapters_when_commands_are_provided(
             "--workdir",
             str(tmp_path),
             "--executor-command",
-            "python3 -m stardrifter_orchestration_mvp.opencode_task_executor",
+            "python3 -m taskplane.opencode_task_executor",
             "--verifier-command",
-            "python3 -m stardrifter_orchestration_mvp.task_verifier",
+            "python3 -m taskplane.task_verifier",
         ],
         repository_builder=lambda *, dsn: object(),
         story_loader=lambda **kwargs: ["issue-56", "issue-57"],
@@ -141,11 +143,11 @@ def test_story_runner_cli_builds_shell_adapters_when_commands_are_provided(
     assert exit_code == 0
     assert (
         captured["executor_command"]
-        == "python3 -m stardrifter_orchestration_mvp.opencode_task_executor"
+        == "python3 -m taskplane.opencode_task_executor"
     )
     assert (
         captured["verifier_command"]
-        == "python3 -m stardrifter_orchestration_mvp.task_verifier"
+        == "python3 -m taskplane.task_verifier"
     )
     assert captured["executor_workdir"] == tmp_path
     assert captured["verifier_workdir"] == tmp_path
@@ -159,7 +161,7 @@ def test_story_runner_cli_builds_shell_adapters_when_commands_are_provided(
 
 def test_story_runner_cli_uses_task_verifier_by_default(monkeypatch, tmp_path):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}
@@ -183,6 +185,7 @@ def test_story_runner_cli_uses_task_verifier_by_default(monkeypatch, tmp_path):
         committer,
         story_integrator=None,
         workspace_manager=None,
+        dsn=None,
     ):
         captured["verifier"] = verifier
         return StoryRunResult(
@@ -210,7 +213,7 @@ def test_story_runner_cli_uses_task_verifier_by_default(monkeypatch, tmp_path):
     assert exit_code == 0
     assert (
         captured["verifier_command"]
-        == "python3 -m stardrifter_orchestration_mvp.task_verifier"
+        == "python3 -m taskplane.task_verifier"
     )
     assert captured["verifier_workdir"] == tmp_path
     assert captured["verifier_check_type"] == "pytest"
@@ -221,7 +224,7 @@ def test_story_runner_cli_builds_story_verifier_when_command_is_provided(
     monkeypatch, tmp_path
 ):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}
@@ -247,6 +250,7 @@ def test_story_runner_cli_builds_story_verifier_when_command_is_provided(
         committer,
         story_integrator=None,
         workspace_manager=None,
+        dsn=None,
     ):
         captured["story_verifier"] = story_verifier
         return StoryRunResult(
@@ -287,7 +291,7 @@ def test_story_runner_cli_builds_workspace_manager_when_worktree_root_is_provide
     monkeypatch, tmp_path
 ):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}
@@ -313,6 +317,7 @@ def test_story_runner_cli_builds_workspace_manager_when_worktree_root_is_provide
         committer,
         story_integrator=None,
         workspace_manager=None,
+        dsn=None,
     ):
         captured["story_integrator"] = story_integrator
         captured["workspace_manager"] = workspace_manager

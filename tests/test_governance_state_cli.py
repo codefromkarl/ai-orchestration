@@ -1,9 +1,9 @@
-from stardrifter_orchestration_mvp.governance_state_cli import main
+from taskplane.governance_state_cli import main
 
 
 def test_governance_state_cli_updates_epic_execution_status(monkeypatch, capsys):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}
@@ -30,7 +30,7 @@ def test_governance_state_cli_updates_epic_execution_status(monkeypatch, capsys)
 
 def test_governance_state_cli_updates_story_execution_status(monkeypatch, capsys):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}
@@ -57,7 +57,7 @@ def test_governance_state_cli_updates_story_execution_status(monkeypatch, capsys
 
 def test_governance_state_cli_supports_epic_state_propagation(monkeypatch, capsys):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}
@@ -90,7 +90,7 @@ def test_governance_state_cli_supports_epic_state_propagation(monkeypatch, capsy
 
 def test_governance_state_cli_supports_story_state_propagation(monkeypatch, capsys):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}

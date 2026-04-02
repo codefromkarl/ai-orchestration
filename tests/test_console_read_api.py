@@ -10,18 +10,18 @@ import pytest
 
 from psycopg.rows import dict_row
 
-from stardrifter_orchestration_mvp import console_api, hierarchy_api
-from stardrifter_orchestration_mvp import _console_api_epics
-from stardrifter_orchestration_mvp import _console_api_internal
-from stardrifter_orchestration_mvp import _console_api_tasks
-from stardrifter_orchestration_mvp import _console_api_repo_jobs
-from stardrifter_orchestration_mvp import _console_api_stories
-from stardrifter_orchestration_mvp.contextweaver_indexing import (
+from taskplane import console_api, hierarchy_api
+from taskplane import _console_api_epics
+from taskplane import _console_api_internal
+from taskplane import _console_api_tasks
+from taskplane import _console_api_repo_jobs
+from taskplane import _console_api_stories
+from taskplane.contextweaver_indexing import (
     CheckoutAliasRecord,
     FileIndexRegistry,
     IndexArtifactRecord,
 )
-from stardrifter_orchestration_mvp.console_read_api import (
+from taskplane.console_read_api import (
     ConsoleNotFoundError,
     get_agent_efficiency_stats,
     get_epic_detail,
@@ -30,6 +30,9 @@ from stardrifter_orchestration_mvp.console_read_api import (
     get_failed_notifications,
     get_story_detail,
     get_task_detail,
+    list_executor_routing_profiles,
+    list_executor_selection_events,
+    list_runtime_observability,
     list_agent_status,
     list_ai_decisions,
     list_epic_rows,
@@ -106,13 +109,29 @@ def test_portfolio_and_status_callables_preserve_public_identity(function_name: 
     assert (
         getattr(
             __import__(
-                "stardrifter_orchestration_mvp.console_read_api",
+                "taskplane.console_read_api",
                 fromlist=[function_name],
             ),
             function_name,
         )
         is console_callable
     )
+    assert hierarchy_callable is console_callable
+
+
+def test_executor_routing_profiles_callable_preserves_public_identity():
+    console_callable = console_api.list_executor_routing_profiles
+    hierarchy_callable = hierarchy_api.list_executor_routing_profiles
+
+    assert list_executor_routing_profiles is console_callable
+    assert hierarchy_callable is console_callable
+
+
+def test_executor_selection_events_callable_preserves_public_identity():
+    console_callable = console_api.list_executor_selection_events
+    hierarchy_callable = hierarchy_api.list_executor_selection_events
+
+    assert list_executor_selection_events is console_callable
     assert hierarchy_callable is console_callable
 
 
@@ -132,7 +151,7 @@ def test_repo_and_job_callables_preserve_public_identity(function_name: str):
     assert (
         getattr(
             __import__(
-                "stardrifter_orchestration_mvp.console_read_api",
+                "taskplane.console_read_api",
                 fromlist=[function_name],
             ),
             function_name,
@@ -159,7 +178,7 @@ def test_epic_callables_preserve_public_identity(function_name: str):
     assert (
         getattr(
             __import__(
-                "stardrifter_orchestration_mvp.console_read_api",
+                "taskplane.console_read_api",
                 fromlist=[function_name],
             ),
             function_name,
@@ -178,7 +197,7 @@ def test_story_callable_preserves_public_identity():
     assert (
         getattr(
             __import__(
-                "stardrifter_orchestration_mvp.console_read_api",
+                "taskplane.console_read_api",
                 fromlist=["get_story_detail"],
             ),
             "get_story_detail",
@@ -197,10 +216,29 @@ def test_task_callable_preserves_public_identity():
     assert (
         getattr(
             __import__(
-                "stardrifter_orchestration_mvp.console_read_api",
+                "taskplane.console_read_api",
                 fromlist=["get_task_detail"],
             ),
             "get_task_detail",
+        )
+        is console_callable
+    )
+    assert hierarchy_callable is console_callable
+
+
+def test_runtime_observability_callable_preserves_public_identity():
+    internal_callable = _console_api_tasks.list_runtime_observability
+    console_callable = console_api.list_runtime_observability
+    hierarchy_callable = hierarchy_api.list_runtime_observability
+
+    assert console_callable is internal_callable
+    assert (
+        getattr(
+            __import__(
+                "taskplane.console_read_api",
+                fromlist=["list_runtime_observability"],
+            ),
+            "list_runtime_observability",
         )
         is console_callable
     )
@@ -728,6 +766,195 @@ def test_get_task_detail_includes_repo_snapshot_state(monkeypatch):
     }
 
 
+def test_get_task_detail_includes_runtime_sessions_and_artifacts():
+    class FakeCursor:
+        def __init__(self) -> None:
+            self.last_sql = ""
+
+        def execute(self, sql, params=None):
+            self.last_sql = sql
+
+        def fetchone(self):
+            if "FROM work_item wi" in self.last_sql:
+                return {"id": "issue-55", "repo": "codefromkarl/stardrifter"}
+            return None
+
+        def fetchall(self):
+            if "FROM execution_session es" in self.last_sql:
+                return [
+                    {
+                        "id": "session-55",
+                        "status": "active",
+                        "attempt_index": 2,
+                        "current_phase": "implementing",
+                        "waiting_reason": None,
+                        "created_at": datetime(2026, 4, 1, 10, 0, 0),
+                        "updated_at": datetime(2026, 4, 1, 10, 5, 0),
+                        "last_checkpoint_phase": "implementing",
+                        "last_checkpoint_index": 3,
+                        "last_checkpoint_summary": "synced resume context",
+                        "last_checkpoint_next_action": "continue",
+                    }
+                ]
+            if "FROM artifact" in self.last_sql:
+                return [
+                    {
+                        "id": 77,
+                        "session_id": "session-55",
+                        "run_id": 12,
+                        "artifact_type": "task_summary",
+                        "artifact_key": "issue-55/task_summary/01.json",
+                        "mime_type": "application/json",
+                        "content_size_bytes": 321,
+                        "metadata": {"summary": "captured runtime handoff"},
+                        "created_at": datetime(2026, 4, 1, 10, 6, 0),
+                    }
+                ]
+            return []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+    class FakeConnection:
+        def cursor(self):
+            return FakeCursor()
+
+    payload = get_task_detail(
+        FakeConnection(),
+        repo="codefromkarl/stardrifter",
+        work_id="issue-55",
+    )
+
+    assert payload["sessions"] == [
+        {
+            "id": "session-55",
+            "status": "active",
+            "attempt_index": 2,
+            "current_phase": "implementing",
+            "waiting_reason": None,
+            "created_at": "2026-04-01T10:00:00",
+            "updated_at": "2026-04-01T10:05:00",
+            "last_checkpoint_phase": "implementing",
+            "last_checkpoint_index": 3,
+            "last_checkpoint_summary": "synced resume context",
+            "last_checkpoint_next_action": "continue",
+        }
+    ]
+    assert payload["artifacts"] == [
+        {
+            "id": 77,
+            "session_id": "session-55",
+            "run_id": 12,
+            "artifact_type": "task_summary",
+            "artifact_key": "issue-55/task_summary/01.json",
+            "mime_type": "application/json",
+            "content_size_bytes": 321,
+            "metadata": {"summary": "captured runtime handoff"},
+            "created_at": "2026-04-01T10:06:00",
+        }
+    ]
+
+
+def test_list_runtime_observability_returns_latest_session_and_artifact_summary():
+    class FakeCursor:
+        def __init__(self) -> None:
+            self.last_sql = ""
+
+        def execute(self, sql, params=None):
+            self.last_sql = sql
+
+        def fetchone(self):
+            return {"repo": "codefromkarl/stardrifter"}
+
+        def fetchall(self):
+            if "FROM work_item wi" in self.last_sql:
+                return [
+                    {
+                        "work_id": "issue-77",
+                        "source_issue_number": 77,
+                        "title": "runtime observation task",
+                        "status": "in_progress",
+                        "lane": "Lane 07",
+                        "wave": "wave-7",
+                        "blocked_reason": None,
+                        "decision_required": False,
+                        "last_failure_reason": "interrupted_retryable",
+                        "active_claim_worker_name": "worker-7",
+                        "session_id": "session-77",
+                        "session_status": "active",
+                        "session_attempt_index": 3,
+                        "session_current_phase": "implementing",
+                        "session_waiting_reason": None,
+                        "session_updated_at": datetime(2026, 4, 1, 12, 30, 0),
+                        "last_checkpoint_summary": "resume context refreshed",
+                        "last_checkpoint_next_action": "continue",
+                        "artifact_id": 701,
+                        "artifact_session_id": "session-77",
+                        "artifact_run_id": 33,
+                        "artifact_type": "task_summary",
+                        "artifact_key": "issue-77/task_summary/01.json",
+                        "artifact_mime_type": "application/json",
+                        "artifact_content_size_bytes": 512,
+                        "artifact_metadata": {"summary": "captured latest planning state"},
+                        "artifact_created_at": datetime(2026, 4, 1, 12, 31, 0),
+                    }
+                ]
+            return []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+    class FakeConnection:
+        def cursor(self):
+            return FakeCursor()
+
+    payload = list_runtime_observability(
+        FakeConnection(),
+        repo="codefromkarl/stardrifter",
+    )
+
+    assert payload == {
+        "repo": "codefromkarl/stardrifter",
+        "items": [
+            {
+                "work_id": "issue-77",
+                "source_issue_number": 77,
+                "title": "runtime observation task",
+                "status": "in_progress",
+                "lane": "Lane 07",
+                "wave": "wave-7",
+                "blocked_reason": None,
+                "decision_required": False,
+                "last_failure_reason": "interrupted_retryable",
+                "active_claim_worker_name": "worker-7",
+                "session_id": "session-77",
+                "session_status": "active",
+                "session_attempt_index": 3,
+                "session_current_phase": "implementing",
+                "session_waiting_reason": None,
+                "session_updated_at": "2026-04-01T12:30:00",
+                "last_checkpoint_summary": "resume context refreshed",
+                "last_checkpoint_next_action": "continue",
+                "artifact_id": 701,
+                "artifact_session_id": "session-77",
+                "artifact_run_id": 33,
+                "artifact_type": "task_summary",
+                "artifact_key": "issue-77/task_summary/01.json",
+                "artifact_mime_type": "application/json",
+                "artifact_content_size_bytes": 512,
+                "artifact_metadata": {"summary": "captured latest planning state"},
+                "artifact_created_at": "2026-04-01T12:31:00",
+            }
+        ],
+    }
+
+
 def test_get_repo_summary_formats_status_count_queries_with_real_table_name():
     executed_sql: list[str] = []
 
@@ -777,7 +1004,7 @@ def test_get_repo_summary_formats_status_count_queries_with_real_table_name():
 def test_get_repo_summary_includes_snapshot_health_from_registry(monkeypatch, tmp_path):
     registry_path = tmp_path / "registry.json"
     registry = FileIndexRegistry(registry_path)
-    monkeypatch.setenv("STARDRIFTER_CONTEXTWEAVER_REGISTRY_PATH", str(registry_path))
+    monkeypatch.setenv("TASKPLANE_CONTEXTWEAVER_REGISTRY_PATH", str(registry_path))
     registry.upsert_artifact(
         IndexArtifactRecord(
             repository_id="control:codefromkarl/stardrifter",

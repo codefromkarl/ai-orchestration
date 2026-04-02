@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from stardrifter_orchestration_mvp import orchestration_loop
+from taskplane import orchestration_loop
 
 
 def test_build_timeout_payload_uses_blocked_timeout_reason():
@@ -72,7 +72,11 @@ def test_orchestration_loop_executor_command_includes_timeout(monkeypatch, tmp_p
         pass
 
     assert captured_commands
-    assert "STARDRIFTER_OPENCODE_TIMEOUT_SECONDS='321'" in captured_commands[0]
+    assert "TASKPLANE_CODEX_TIMEOUT_SECONDS='321'" in captured_commands[0]
+    assert (
+        "python3 -m taskplane.codex_task_executor"
+        in captured_commands[0]
+    )
 
 
 def test_orchestration_loop_passes_worktree_root_to_story_runner(monkeypatch, tmp_path):

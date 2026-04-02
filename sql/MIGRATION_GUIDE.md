@@ -7,6 +7,9 @@
 1. **001_parallel_execution_extensions.sql** - 并行执行基础表
 2. **002_global_coordination.sql** - 全局协调表
 3. **003_ui_enhancements.sql** - UI 增强视图
+4. **004_artifact_store.sql** - artifact store / executor registry / task executor mapping
+5. **005_dlq_and_observability.sql** - dead letter queue / event log / observability views
+6. **006_executor_routing_profiles.sql** - 多画像 executor routing 与优先级迁移
 
 ## 缺失表修复
 
@@ -14,12 +17,12 @@
 
 ```bash
 # 使用 psql
-psql -h localhost -U stardrifter -d stardrifter_orchestration -f sql/apply_001.sql
+psql -h localhost -U stardrifter -d taskplane -f sql/apply_001.sql
 
 # 或使用 Python
 uv run python -c "
 import psycopg
-conn = psycopg.connect('postgresql://stardrifter:stardrifter@localhost:5432/stardrifter_orchestration')
+conn = psycopg.connect('postgresql://stardrifter:stardrifter@localhost:5432/taskplane')
 with open('sql/apply_001.sql') as f:
     conn.cursor().execute(f.read())
 conn.commit()
@@ -52,6 +55,27 @@ conn.commit()
 ├── v_agent_efficiency_stats
 ├── v_repo_agent_allocation
 └── v_portfolio_summary
+
+004_artifact_store.sql
+├── artifact
+├── executor_registry
+├── task_executor_mapping
+├── v_artifact_index
+├── v_executor_capacity
+└── v_artifact_references
+
+005_dlq_and_observability.sql
+├── dead_letter_queue
+├── event_log
+├── v_dlq_attention_required
+├── v_recent_events
+└── v_task_timeline
+
+006_executor_routing_profiles.sql
+├── task_executor_mapping.id 主键化
+├── task_executor_mapping.priority
+├── task_executor_mapping(task_type, priority) 索引
+└── 多画像 routing seed data
 ```
 
 ## 验证迁移
@@ -59,7 +83,7 @@ conn.commit()
 ```bash
 uv run python -c "
 import psycopg
-conn = psycopg.connect('postgresql://stardrifter:stardrifter@localhost:5432/stardrifter_orchestration')
+conn = psycopg.connect('postgresql://stardrifter:stardrifter@localhost:5432/taskplane')
 cur = conn.cursor()
 cur.execute('''
     SELECT table_name FROM information_schema.tables

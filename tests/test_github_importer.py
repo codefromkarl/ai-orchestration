@@ -1,4 +1,4 @@
-from stardrifter_orchestration_mvp.github_importer import (
+from taskplane.github_importer import (
     build_completion_audit,
     extract_relation_candidates,
     normalize_github_issue,
@@ -197,3 +197,23 @@ def test_normalize_github_issue_infers_lane_for_wave_governance_task():
     assert normalized.lane == "lane:INT"
     assert "missing-lane" not in normalized.anomaly_codes
     assert "missing-parent-reference" not in normalized.anomaly_codes
+
+
+def test_normalize_github_issue_prefers_status_done_for_closed_issue_with_stale_labels():
+    raw_issue = {
+        "number": 21,
+        "title": "[Story][01-A] Authored topology truth 冻结",
+        "body": "Part of #13.",
+        "state": "CLOSED",
+        "url": "https://github.com/codefromkarl/stardrifter/issues/21",
+        "labels": [
+            {"name": "story"},
+            {"name": "status:pending"},
+            {"name": "status:done"},
+            {"name": "lane:01"},
+        ],
+    }
+
+    normalized = normalize_github_issue("codefromkarl/stardrifter", raw_issue)
+
+    assert normalized.status_label == "status:done"

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import subprocess
 
-from stardrifter_orchestration_mvp.git_committer import (
+from taskplane.git_committer import (
     build_git_committer,
     build_git_story_integrator,
 )
-from stardrifter_orchestration_mvp.models import WorkItem
-from stardrifter_orchestration_mvp.worker import ExecutionResult
+from taskplane.models import WorkItem
+from taskplane.worker import ExecutionResult
 
 
 def _init_repo(tmp_path):

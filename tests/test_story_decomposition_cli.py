@@ -1,10 +1,10 @@
-from stardrifter_orchestration_mvp.story_decomposition_cli import main
-from stardrifter_orchestration_mvp.story_decomposition import StoryDecompositionResult
+from taskplane.story_decomposition_cli import main
+from taskplane.story_decomposition import StoryDecompositionResult
 
 
 def test_story_decomposition_cli_runs_and_prints_active(monkeypatch, capsys, tmp_path):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}
@@ -35,7 +35,7 @@ def test_story_decomposition_cli_runs_and_prints_active(monkeypatch, capsys, tmp
             "--workdir",
             str(tmp_path),
             "--decomposer-command",
-            "python3 -m stardrifter_orchestration_mvp.opencode_story_decomposer",
+            "python3 -m taskplane.opencode_story_decomposer",
         ],
         repository_builder=fake_repository_builder,
         decomposition_runner=fake_story_runner,

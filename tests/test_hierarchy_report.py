@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from stardrifter_orchestration_mvp.github_importer import normalize_github_issue
-from stardrifter_orchestration_mvp.hierarchy_report import (
+from taskplane.github_importer import normalize_github_issue
+from taskplane.hierarchy_report import (
     build_hierarchy_tree,
     format_hierarchy_tree,
 )

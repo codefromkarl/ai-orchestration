@@ -266,6 +266,27 @@ export function buildTaskDrawerItem(args: {
       detail.retry_context.latest_failure_reason_code,
     ].filter(Boolean).join(' · '),
     snapshotState: detail.snapshot_state,
+    runtimeSessions: detail.sessions.map((session) => ({
+      id: session.id,
+      status: session.status,
+      attemptIndex: session.attempt_index,
+      currentPhase: session.current_phase,
+      waitingReason: session.waiting_reason,
+      updatedAt: session.updated_at,
+      checkpointSummary: session.last_checkpoint_summary,
+      checkpointNextAction: session.last_checkpoint_next_action,
+    })),
+    artifacts: detail.artifacts.map((artifact) => ({
+      id: artifact.id,
+      sessionId: artifact.session_id,
+      runId: artifact.run_id,
+      artifactType: artifact.artifact_type,
+      artifactKey: artifact.artifact_key,
+      mimeType: artifact.mime_type,
+      contentSizeBytes: artifact.content_size_bytes,
+      summary: typeof artifact.metadata?.summary === 'string' ? artifact.metadata.summary : undefined,
+      createdAt: artifact.created_at,
+    })),
     actionButtons: [
       {
         label: 'Retry task',

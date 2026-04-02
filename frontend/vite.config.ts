@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   base: './',
   build: {
-    outDir: resolve(__dirname, '../src/stardrifter_orchestration_mvp/static'),
+    outDir: resolve(__dirname, '../src/taskplane/static'),
     emptyOutDir: false,
     rollupOptions: {
       input: {

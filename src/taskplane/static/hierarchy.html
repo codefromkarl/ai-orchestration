@@ -1,0 +1,1620 @@
+<!--
+  DEPRECATED: This standalone hierarchy.html is superseded by the React GovernanceHierarchy component.
+  Please use the React app at /hierarchy route instead.
+  This file is retained for reference only and will be removed in a future release.
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>治理层级工作台</title>
+<script src="https://unpkg.com/d3@7/dist/d3.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f172a;
+  --bg-elev:#111c34;
+  --bg-panel:#f8fafc;
+  --surface:#ffffff;
+  --surface-alt:#e2e8f0;
+  --surface-strong:#cbd5e1;
+  --text:#0f172a;
+  --text-soft:#475569;
+  --text-muted:#64748b;
+  --text-inverse:#e2e8f0;
+  --accent:#38bdf8;
+  --accent-strong:#0ea5e9;
+  --accent-soft:rgba(56,189,248,.16);
+  --danger:#ef4444;
+  --warning:#f59e0b;
+  --success:#22c55e;
+  --ring:0 0 0 3px rgba(56,189,248,.18);
+  --shadow-lg:0 24px 48px rgba(15,23,42,.18);
+  --shadow-md:0 10px 24px rgba(15,23,42,.12);
+  --radius-xl:24px;
+  --radius-lg:18px;
+  --radius-md:12px;
+  --radius-sm:10px;
+}
+body{
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  background:radial-gradient(circle at top left, rgba(56,189,248,.18), transparent 26%),linear-gradient(180deg,#0b1120 0%,#10192f 36%,#eef4fb 36%,#f8fafc 100%);
+  color:var(--text);
+  min-height:100vh;
+}
+button,input{font:inherit}
+button{border:none;background:none}
+a{color:inherit}
+.app-shell{
+  min-height:100vh;
+  display:flex;
+  flex-direction:column;
+}
+.toolbar{
+  display:flex;
+  align-items:flex-end;
+  justify-content:space-between;
+  gap:24px;
+  padding:28px 32px 24px;
+  color:var(--text-inverse);
+}
+.toolbar__title-group{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  max-width:640px;
+}
+.eyebrow{
+  font-size:11px;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  color:rgba(226,232,240,.72);
+  font-weight:700;
+}
+.toolbar h1{
+  font-size:30px;
+  line-height:1.08;
+  font-weight:700;
+  letter-spacing:-.03em;
+}
+.toolbar__summary{
+  font-size:14px;
+  line-height:1.6;
+  color:rgba(226,232,240,.8);
+}
+.toolbar__status-row{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:10px;
+}
+.status-pill,
+.legend-pill,
+.mini-badge,
+.badge{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:600;
+}
+.status-pill{
+  background:rgba(148,163,184,.18);
+  color:#e2e8f0;
+  padding:7px 12px;
+  border:1px solid rgba(148,163,184,.22);
+}
+.status-pill.is-loading{background:rgba(59,130,246,.2);border-color:rgba(59,130,246,.3)}
+.status-pill.is-error{background:rgba(239,68,68,.18);border-color:rgba(239,68,68,.28);color:#fecaca}
+.status-pill.is-ready{background:rgba(34,197,94,.18);border-color:rgba(34,197,94,.26);color:#dcfce7}
+.status-dot{
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:currentColor;
+  opacity:.9;
+}
+.toolbar__controls{
+  width:min(560px,100%);
+  display:flex;
+  flex-wrap:wrap;
+  align-items:flex-end;
+  gap:12px;
+  justify-content:flex-end;
+}
+.field{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  min-width:220px;
+  flex:1 1 260px;
+}
+.field span{
+  font-size:12px;
+  font-weight:600;
+  color:rgba(226,232,240,.78);
+}
+.field input{
+  width:100%;
+  border-radius:14px;
+  border:1px solid rgba(148,163,184,.28);
+  background:rgba(15,23,42,.55);
+  color:#f8fafc;
+  padding:13px 15px;
+  outline:none;
+  transition:border-color .2s ease, box-shadow .2s ease, background .2s ease;
+}
+.field input::placeholder{color:rgba(226,232,240,.38)}
+.field input:focus{
+  border-color:rgba(56,189,248,.8);
+  box-shadow:var(--ring);
+  background:rgba(15,23,42,.7);
+}
+.button{
+  border-radius:14px;
+  padding:13px 18px;
+  font-size:14px;
+  font-weight:700;
+  cursor:pointer;
+   transition:transform .18s ease, background .18s ease, border-color .18s ease, color .18s ease, box-shadow .18s ease, opacity .18s ease;
+}
+.button:hover{transform:translateY(-1px)}
+.button:active{transform:translateY(0)}
+.button:focus-visible,.icon-button:focus-visible,.tree-tip:focus-visible{outline:none;box-shadow:var(--ring)}
+.button--primary{
+  background:linear-gradient(135deg,var(--accent),var(--accent-strong));
+  color:#082f49;
+}
+.button--primary:hover{background:linear-gradient(135deg,#67e8f9,#38bdf8)}
+.button--ghost{
+  background:rgba(148,163,184,.1);
+  color:#e2e8f0;
+  border:1px solid rgba(148,163,184,.2);
+}
+.button--ghost:hover{background:rgba(148,163,184,.18)}
+.workspace{
+  flex:1;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 400px;
+  gap:22px;
+  padding:0 24px 24px;
+  min-height:0;
+}
+.workspace__main{
+  display:flex;
+  flex-direction:column;
+  gap:18px;
+  min-width:0;
+}
+.panel{
+  background:var(--surface);
+  border:1px solid rgba(148,163,184,.22);
+  border-radius:var(--radius-xl);
+  box-shadow:var(--shadow-md);
+}
+.summary-panel{
+  display:grid;
+  grid-template-columns:minmax(280px,1.3fr) minmax(240px,.9fr) minmax(220px,.9fr);
+  gap:18px;
+  padding:18px;
+}
+.summary-card{
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+  min-width:0;
+}
+.summary-card--hero{
+  background:linear-gradient(180deg,#f8fbff 0%,#eff6ff 100%);
+  border-radius:20px;
+  padding:18px;
+  border:1px solid rgba(125,211,252,.35);
+}
+.summary-card h2,.summary-card h3{
+  font-size:18px;
+  line-height:1.25;
+}
+.summary-copy{
+  font-size:14px;
+  line-height:1.65;
+  color:var(--text-soft);
+}
+.governance-metrics{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:10px;
+}
+.metric{
+  background:#fff;
+  border:1px solid #dbe5f0;
+  border-radius:16px;
+  padding:12px 14px;
+}
+.metric__label{
+  display:block;
+  font-size:11px;
+  font-weight:700;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  color:var(--text-muted);
+  margin-bottom:8px;
+}
+.metric__value{
+  display:block;
+  font-size:24px;
+  font-weight:700;
+  color:var(--text);
+}
+.metric__hint{
+  margin-top:6px;
+  font-size:12px;
+  color:var(--text-soft);
+}
+.section-list{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.section-list li{
+  list-style:none;
+  display:flex;
+  gap:10px;
+  font-size:13px;
+  line-height:1.55;
+  color:var(--text-soft);
+}
+.section-list li::before{
+  content:"";
+  width:8px;
+  height:8px;
+  margin-top:6px;
+  border-radius:999px;
+  background:linear-gradient(135deg,var(--accent),#2563eb);
+  flex-shrink:0;
+}
+.legend-grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:8px;
+}
+.legend-pill{
+  justify-content:flex-start;
+  background:#f8fafc;
+  border:1px solid #e2e8f0;
+  color:var(--text-soft);
+  padding:8px 10px;
+}
+.legend-swatch{
+  width:10px;
+  height:10px;
+  border-radius:50%;
+  flex-shrink:0;
+}
+.tree-panel{
+  flex:1;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+.panel__header{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:16px;
+  padding:20px 22px 18px;
+  border-bottom:1px solid #e2e8f0;
+}
+.panel__header h2{
+  font-size:21px;
+  line-height:1.2;
+}
+.panel__description{
+  margin-top:8px;
+  font-size:14px;
+  line-height:1.6;
+  color:var(--text-soft);
+  max-width:720px;
+}
+.workspace-meta{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  justify-content:flex-end;
+}
+.mini-badge{
+  padding:7px 10px;
+  background:#f8fafc;
+  color:var(--text-soft);
+  border:1px solid #e2e8f0;
+}
+.tree-stage{
+  position:relative;
+  flex:1;
+  min-height:520px;
+  overflow:hidden;
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.6),rgba(248,250,252,.95)),
+    linear-gradient(90deg,rgba(148,163,184,.08) 1px,transparent 1px),
+    linear-gradient(rgba(148,163,184,.08) 1px,transparent 1px);
+  background-size:auto,32px 32px,32px 32px;
+}
+#tree-container{
+  position:relative;
+  width:100%;
+  height:100%;
+  min-height:520px;
+  overflow:hidden;
+}
+.tree-stage__overlay{
+  position:absolute;
+  inset:18px 18px auto 18px;
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:12px;
+  pointer-events:none;
+}
+.overlay-card{
+  max-width:360px;
+  background:rgba(255,255,255,.88);
+  backdrop-filter:blur(12px);
+  border:1px solid rgba(226,232,240,.9);
+  border-radius:18px;
+  padding:12px 14px;
+  box-shadow:0 12px 24px rgba(15,23,42,.08);
+  pointer-events:auto;
+}
+.overlay-card h3{
+  font-size:12px;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  color:var(--text-muted);
+  margin-bottom:8px;
+}
+.overlay-card p{
+  font-size:13px;
+  line-height:1.55;
+  color:var(--text-soft);
+}
+.tree-tip{
+  border-radius:12px;
+  padding:9px 12px;
+  background:#0f172a;
+  color:#e2e8f0;
+  font-size:12px;
+  font-weight:600;
+  border:1px solid rgba(148,163,184,.2);
+  cursor:default;
+  box-shadow:0 10px 18px rgba(15,23,42,.12);
+}
+.spinner{
+  position:absolute;
+  top:50%;
+  left:50%;
+  transform:translate(-50%,-50%);
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:12px 16px;
+  border-radius:999px;
+  background:rgba(15,23,42,.88);
+  color:#e2e8f0;
+  font-size:13px;
+  box-shadow:0 18px 36px rgba(15,23,42,.25);
+}
+.spinner::before{
+  content:"";
+  width:12px;
+  height:12px;
+  border-radius:50%;
+  border:2px solid rgba(226,232,240,.25);
+  border-top-color:#38bdf8;
+  animation:spin .9s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+.detail-panel{
+  display:flex;
+  flex-direction:column;
+  min-height:0;
+  overflow:hidden;
+}
+.detail-panel__header{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:14px;
+  padding:20px 22px 16px;
+  border-bottom:1px solid #e2e8f0;
+}
+.detail-panel__title-group{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.detail-panel__title-group h2{
+  font-size:21px;
+  line-height:1.2;
+}
+.detail-panel__hint{
+  font-size:13px;
+  line-height:1.6;
+  color:var(--text-soft);
+}
+.icon-button{
+  width:36px;
+  height:36px;
+  border-radius:12px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  font-size:20px;
+  color:var(--text-muted);
+  background:#f8fafc;
+  border:1px solid #e2e8f0;
+  cursor:pointer;
+  flex-shrink:0;
+}
+.icon-button:hover{background:#eef2f7;color:var(--text)}
+.detail-panel__body{
+  flex:1;
+  min-height:0;
+  overflow:auto;
+  padding:18px 22px 24px;
+}
+.inline-state,
+.empty-state{
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+  padding:18px;
+  border:1px dashed #cbd5e1;
+  border-radius:18px;
+  background:linear-gradient(180deg,#f8fafc 0%,#f1f5f9 100%);
+}
+.inline-state{
+  gap:12px;
+  border-style:solid;
+  background:#fff;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.8);
+}
+.inline-state--loading{
+  border-color:#bfdbfe;
+  background:linear-gradient(180deg,#f8fbff 0%,#eff6ff 100%);
+}
+.inline-state--error{
+  border-color:#fecaca;
+  background:linear-gradient(180deg,#fff7f7 0%,#fef2f2 100%);
+}
+.inline-state__eyebrow{
+  font-size:11px;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  color:var(--text-muted);
+  font-weight:700;
+}
+.inline-state__title,
+.empty-state h3{font-size:18px}
+.inline-state__title{font-size:17px;line-height:1.35}
+.inline-state__body,
+.empty-state p{
+  font-size:14px;
+  line-height:1.65;
+  color:var(--text-soft);
+}
+.inline-state__meta{
+  font-size:12px;
+  line-height:1.6;
+  color:var(--text-muted);
+}
+.inline-state__list,
+.empty-state ul{
+  display:flex;
+  flex-direction:column;
+  gap:9px;
+  padding-left:18px;
+  color:var(--text-soft);
+  font-size:13px;
+  line-height:1.55;
+}
+.detail-stack{
+  display:flex;
+  flex-direction:column;
+  gap:16px;
+}
+.detail-heading-block{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  min-width:0;
+}
+.detail-heading-block p{
+  font-size:13px;
+  line-height:1.6;
+  color:var(--text-soft);
+}
+.detail-topline{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+}
+.detail-topline h3{
+  font-size:20px;
+  line-height:1.28;
+}
+.badge-row{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+.badge{padding:7px 11px}
+.detail-meta-grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:10px;
+}
+.meta-card{
+  padding:12px 14px;
+  border-radius:16px;
+  background:#f8fafc;
+  border:1px solid #e2e8f0;
+}
+.meta-card__label{
+  display:block;
+  font-size:11px;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  color:var(--text-muted);
+  font-weight:700;
+  margin-bottom:7px;
+}
+.meta-card__value{
+  font-size:14px;
+  font-weight:600;
+  color:var(--text);
+  word-break:break-word;
+  line-height:1.55;
+}
+.detail-section{
+  border:1px solid #e2e8f0;
+  border-radius:18px;
+  overflow:hidden;
+  background:#fff;
+}
+.detail-section__header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:14px 16px;
+  background:#f8fafc;
+  border-bottom:1px solid #e2e8f0;
+}
+.detail-section__header h4{
+  font-size:13px;
+  font-weight:700;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:var(--text-muted);
+}
+.detail-section__body{
+  padding:14px 16px;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+.detail-body-text{
+  white-space:pre-wrap;
+  word-break:break-word;
+   max-height:320px;
+   overflow:auto;
+   font-size:14px;
+   line-height:1.75;
+   color:var(--text-soft);
+   background:#f8fafc;
+   border:1px solid #e2e8f0;
+   border-radius:14px;
+   padding:14px;
+}
+.diagnostic-banner{
+  padding:12px 14px;
+  border-radius:14px;
+  font-size:13px;
+  line-height:1.55;
+  font-weight:600;
+}
+.diagnostic-banner--warning{background:#fff7ed;border:1px solid #fed7aa;color:#c2410c}
+.diagnostic-banner--danger{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c}
+.rel-list{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.rel-item{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:10px 12px;
+  border-radius:14px;
+  background:#fff;
+  border:1px solid #e2e8f0;
+  font-size:13px;
+  transition:border-color .18s ease, background .18s ease, transform .18s ease, box-shadow .18s ease;
+}
+.rel-item:hover{
+  border-color:#cbd5e1;
+  background:#f8fafc;
+  transform:translateY(-1px);
+  box-shadow:0 8px 18px rgba(15,23,42,.05);
+}
+.rel-item__label{font-weight:600;color:var(--text)}
+.rel-item__meta{color:var(--text-muted);font-size:12px}
+.gh-link{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  color:#0369a1;
+  text-decoration:none;
+  font-size:13px;
+  font-weight:700;
+}
+.gh-link:hover{text-decoration:underline}
+.node circle{cursor:pointer;stroke-width:2;transition:transform .16s ease, filter .16s ease, stroke-width .16s ease}
+.node:hover circle{filter:brightness(1.06);stroke-width:2.5}
+.node text{font-size:12px;cursor:pointer;user-select:none;fill:#0f172a;transition:fill .16s ease, font-weight .16s ease}
+.node:hover text{fill:#020617}
+.link{fill:none;stroke:#94a3b8;stroke-width:1.5px}
+#tooltip{
+  position:absolute;
+  pointer-events:none;
+  background:rgba(15,23,42,.94);
+  color:#fff;
+  padding:8px 10px;
+  border-radius:10px;
+  font-size:12px;
+  display:none;
+  max-width:280px;
+  z-index:100;
+  box-shadow:0 12px 24px rgba(15,23,42,.25);
+}
+@media (max-width:1240px){
+  .workspace{grid-template-columns:minmax(0,1fr)}
+  .detail-panel{min-height:420px}
+}
+@media (max-width:980px){
+  .toolbar{flex-direction:column;align-items:stretch;padding:24px 20px 20px}
+  .toolbar__controls{width:100%;justify-content:flex-start}
+  .summary-panel{grid-template-columns:1fr}
+}
+@media (max-width:720px){
+  .workspace{padding:0 12px 12px}
+  .panel__header,.detail-panel__header,.detail-panel__body{padding-left:16px;padding-right:16px}
+  .toolbar h1{font-size:24px}
+  .detail-meta-grid,.governance-metrics,.legend-grid{grid-template-columns:1fr}
+  .tree-stage__overlay{position:static;padding:14px;display:grid;gap:10px}
+  .tree-stage{display:flex;flex-direction:column}
+  #tree-container{min-height:440px}
+}
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <header class="toolbar">
+    <div class="toolbar__title-group">
+      <p class="eyebrow" id="toolbar-eyebrow">Taskplane</p>
+      <h1 id="toolbar-title">治理层级工作台</h1>
+      <p id="toolbar-summary" class="toolbar__summary">加载仓库后查看 Epic、Story、Task 的治理拓扑，并在右侧快速检查问题详情。</p>
+      <div class="toolbar__status-row">
+        <span id="connection-state" class="status-pill" role="status" aria-live="polite"><span class="status-dot"></span>等待加载治理树</span>
+        <span id="toolbar-status-hint" class="status-pill"><span class="status-dot"></span>不改后端契约，只调整界面呈现</span>
+      </div>
+    </div>
+
+    <div class="toolbar__controls">
+      <div class="top-nav__locale">
+        <button id="locale-zh-btn" class="button button--ghost" type="button">中</button>
+        <button id="locale-en-btn" class="button button--ghost" type="button">EN</button>
+      </div>
+      <label class="field" for="repo-input">
+        <span id="repo-label">仓库</span>
+        <input id="repo-input" type="text" placeholder="owner/repo" value="__DEFAULT_REPO__" autocomplete="off">
+      </label>
+      <button id="load-btn" class="button button--primary" type="button">加载治理视图</button>
+      <button id="focus-detail-btn" class="button button--ghost" type="button">定位详情面板</button>
+    </div>
+  </header>
+
+  <div class="workspace">
+    <section class="workspace__main">
+      <section id="summary-panel" class="summary-panel panel" aria-label="治理摘要">
+        <article class="summary-card summary-card--hero">
+          <div>
+            <p id="repo-context-eyebrow" class="eyebrow" style="color:#0369a1">当前上下文</p>
+            <h2 id="repo-heading">选择一个仓库</h2>
+          </div>
+          <p id="repo-summary" class="summary-copy">加载仓库后可查看当前治理树，并快速识别脱离父级分组的故事或任务。</p>
+          <div class="governance-metrics">
+            <div class="metric">
+              <span id="metric-root-label" class="metric__label">根节点范围</span>
+              <span id="metric-root-scope" class="metric__value">—</span>
+              <span id="metric-root-hint" class="metric__hint">仓库根节点与治理分组</span>
+            </div>
+            <div class="metric">
+              <span id="metric-orphan-label" class="metric__label">游离分组</span>
+              <span id="metric-orphans" class="metric__value">—</span>
+              <span id="metric-orphan-hint" class="metric__hint">未挂在 Epic 主线下的 Story / Task</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="summary-card">
+          <div>
+            <p id="guide-eyebrow" class="eyebrow" style="color:#64748b">使用说明</p>
+            <h3 id="guide-title">如何查看这张图</h3>
+          </div>
+          <ul id="guide-list" class="section-list">
+            <li>点击编号节点查看治理详情。</li>
+            <li>根节点和游离分组仍可折叠展开。</li>
+            <li>右侧面板用于快速确认关系和执行状态。</li>
+          </ul>
+        </article>
+
+        <article class="summary-card">
+          <div>
+            <p id="legend-eyebrow" class="eyebrow" style="color:#64748b">图例</p>
+            <h3 id="legend-title">层级与状态标记</h3>
+          </div>
+          <div class="legend-grid" id="legend-grid"></div>
+        </article>
+      </section>
+
+      <section id="workspace-panel-label" class="tree-panel panel" aria-label="层级工作区">
+        <div class="panel__header">
+          <div>
+            <p id="workspace-eyebrow" class="eyebrow" style="color:#64748b">层级工作区</p>
+            <h2 id="workspace-title">治理执行拓扑</h2>
+            <p id="workspace-description" class="panel__description">左侧查看拓扑，右侧查看问题详情与执行信号。</p>
+          </div>
+          <div class="workspace-meta">
+            <span class="mini-badge" id="tree-meta-repo">Repo: —</span>
+            <span class="mini-badge" id="tree-meta-selection">选择：无</span>
+          </div>
+        </div>
+        <div class="tree-stage">
+          <div class="tree-stage__overlay">
+            <div class="overlay-card">
+              <h3 id="workspace-guidance-title">操作提示</h3>
+              <p id="workspace-guidance">先展开 Epic 分支，再结合右侧面板确认执行状态与关系。</p>
+            </div>
+            <div id="tree-tip" class="tree-tip" aria-hidden="true">滚动缩放 · 拖动平移 · 点击节点查看详情</div>
+          </div>
+          <div id="tree-container">
+            <div class="spinner" id="spinner" style="display:none">Loading governance hierarchy...</div>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <aside id="detail-panel" class="detail-panel panel" aria-label="问题详情面板">
+      <div class="detail-panel__header">
+        <div class="detail-panel__title-group">
+          <p id="detail-eyebrow" class="eyebrow" style="color:#64748b">问题详情</p>
+          <h2 id="detail-panel-title">治理详情面板</h2>
+          <p id="detail-panel-hint" class="detail-panel__hint">选择编号节点后，这里会显示上下文、关系和执行状态。</p>
+        </div>
+        <button id="close-panel" class="icon-button" type="button" aria-label="关闭详情面板">×</button>
+      </div>
+      <div class="detail-panel__body">
+        <div id="detail-content" class="empty-state">
+          <h3>选择编号问题</h3>
+          <p>保持树视图可见，并在这里查看当前问题的治理详情。</p>
+          <ul>
+            <li>点击 Epic / Story / Task 节点加载详情。</li>
+            <li>根节点和游离分组仍可折叠展开。</li>
+            <li>若仓库已预填，页面打开后会自动加载。</li>
+          </ul>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+<div id="tooltip"></div>
+
+<script>
+const LOCALE_STORAGE_KEY = 'taskplane-console-locale';
+const STATUS_COLOR = {
+  pending: '#94a3b8',
+  ready: '#fbbf24',
+  in_progress: '#f97316',
+  verifying: '#a855f7',
+  blocked: '#ef4444',
+  done: '#22c55e',
+};
+const KIND_R = { epic: 18, story: 12, task: 8 };
+const KIND_COLOR = { epic: '#3b82f6', story: '#10b981', task: '#6366f1', group: '#475569', root: '#0f172a' };
+
+let currentRepo = '';
+let currentTreeData = null;
+let currentSelection = null;
+let currentLocale = (() => {
+  try {
+    const stored = window.localStorage.getItem(LOCALE_STORAGE_KEY);
+    return stored === 'en' || stored === 'zh' ? stored : 'zh';
+  } catch (error) {
+    return 'zh';
+  }
+})();
+
+const TRANSLATIONS = {
+  zh: {
+    htmlLang: 'zh-CN',
+    pageTitle: '治理层级工作台',
+    toolbarEyebrow: 'Taskplane',
+    toolbarTitle: '治理层级工作台',
+    toolbarSummary: '加载仓库后查看史诗、故事、任务的治理拓扑，并在右侧快速检查问题详情。',
+    toolbarStatusHint: '不改后端契约，只调整界面呈现',
+    waiting: '等待加载治理树',
+    repoLabel: '仓库',
+    load: '加载治理视图',
+    focus: '定位详情面板',
+    summaryLabel: '治理摘要',
+    repoContextEyebrow: '当前上下文',
+    repoHeadingEmpty: '选择一个仓库',
+    repoSummaryEmpty: '加载仓库后可查看当前治理树，并快速识别脱离父级分组的故事或任务。',
+    metricRootLabel: '根节点范围',
+    metricRootHint: '仓库根节点与治理分组',
+    metricOrphanLabel: '游离分组',
+    metricOrphanHint: '未挂在史诗主线下的故事 / 任务',
+    guideEyebrow: '使用说明',
+    guideTitle: '如何查看这张图',
+    guideItems: ['点击编号节点查看治理详情。', '根节点和游离分组仍可折叠展开。', '右侧面板用于快速确认关系和执行状态。'],
+    legendEyebrow: '图例',
+    legendTitle: '层级与状态标记',
+    workspaceLabel: '层级工作区',
+    workspaceEyebrow: '层级工作区',
+    workspaceTitle: '治理执行拓扑',
+    workspaceDescription: '左侧查看拓扑，右侧查看问题详情与执行信号。',
+    treeMetaRepo: ({ repo }) => `仓库：${repo}`,
+    treeMetaSelection: ({ label }) => `选择：${label}`,
+    workspaceGuidanceTitle: '操作提示',
+    workspaceGuidanceDefault: '先展开史诗分支，再结合右侧面板确认执行状态与关系。',
+    treeTip: '滚动缩放 · 拖动平移 · 点击节点查看详情',
+    spinner: '正在加载治理树...',
+    detailPanelLabel: '问题详情面板',
+    detailEyebrow: '问题详情',
+    detailPanelTitle: '治理详情面板',
+    detailPanelHint: '选择编号节点后，这里会显示上下文、关系和执行状态。',
+    closePanelAria: '关闭详情面板',
+    drawerIdleTitle: '选择编号问题',
+    drawerIdleBody: '保持树视图可见，并在这里查看当前问题的治理详情。',
+    drawerIdleBullets: ['点击史诗 / 故事 / 任务节点加载详情。', '根节点和游离分组仍可折叠展开。', '若仓库已预填，页面打开后会自动加载。'],
+    statusLoadingTree: ({ repo }) => `正在加载 ${repo} 的治理树`,
+    statusLoadedTree: ({ repo }) => `已加载 ${repo} 的治理树`,
+    statusLoadFailed: ({ message }) => `加载失败：${message}`,
+    render: {
+      idleEyebrow: '问题详情',
+      loadingTitle: ({ number }) => `正在加载问题 #${number}`,
+      loadingBody: '正在获取该问题的治理信息与执行状态。',
+      loadingMeta: '树视图仍可继续操作。',
+      errorTitle: '无法加载问题详情',
+      errorBody: '请检查当前仓库上下文后重试。',
+      hierarchyErrorEyebrow: '层级状态',
+      hierarchyErrorTitle: '无法加载治理树',
+      hierarchyErrorBody: ({ repo }) => `无法加载 ${repo || '当前仓库'} 的层级数据。`,
+      hierarchyErrorBullets: ['确认仓库格式为 owner/repo。', '确认层级接口可访问后再试。', '如果之前已经加载成功，可继续查看已有树图。'],
+      requestError: ({ message }) => `请求错误：${message}`,
+      repoSummaryLoaded: ({ epicCount, orphanStories, orphanTasks }) => `当前仓库包含 ${epicCount} 个史诗根节点、${orphanStories} 个游离故事、${orphanTasks} 个游离任务。`,
+      workspaceGuidanceWithOrphans: '当前仓库存在游离分组，建议先核对治理挂载关系。',
+      workspaceGuidanceClean: '当前没有游离分组，可直接沿史诗主线检查执行情况。',
+      orphanStories: '游离故事',
+      orphanTasks: '游离任务',
+      group: '分组',
+      selectedIssue: '当前问题',
+      detailIntro: '先确认治理链路，再决定是否进入其他执行工具。',
+      lane: '泳道',
+      complexity: '复杂度',
+      executionStatus: '执行状态',
+      workItemWave: '工作项 / 波次',
+      notProjected: '未投影到 work_item',
+      repositoryIssue: '仓库问题',
+      openGithub: '打开 GitHub 问题',
+      blockedBanner: ({ reason }) => `当前执行被阻塞：${reason}`,
+      decisionBanner: '继续自动化前需要人工确认约束、优先级或范围。',
+      description: '描述',
+      parentLineage: '父级链路',
+      governanceParent: '治理父级',
+      relations: '关系',
+      relationFallback: '关系',
+      executionDiagnostics: '执行诊断',
+      status: '状态',
+      wave: '波次',
+      workItemId: '工作项 ID',
+      decisionGate: '决策门',
+      needsOperatorDecision: '需要人工决策',
+      legend: ['史诗', '故事', '任务', '待处理', '就绪', '阻塞', '进行中', '已完成'],
+      issueKinds: { epic: '史诗', story: '故事', task: '任务', group: '分组', root: '根节点', unknown: '未知' },
+      statuses: { pending: '待处理', ready: '就绪', in_progress: '进行中', verifying: '验证中', blocked: '阻塞', done: '已完成', unknown: '未知' },
+      githubStates: { open: '开启', closed: '已关闭' },
+      taskTypes: { core_path: '核心路径', cross_cutting: '横切改动', documentation: '文档', governance: '治理' },
+      relationTypes: { blocked_by: '被阻塞于', blocks: '阻塞', depends_on: '依赖', parent: '父级', parent_candidate: '候选父级' },
+      reasonCodes: {
+        waiting_for_retry: '等待重试',
+        interrupted_retryable: '中断后可重试',
+        credential_required: '需要凭证',
+        tooling_error: '工具错误',
+        protocol_error: '协议错误',
+        missing_approval: '缺少批准',
+        invalid_result_payload: '结果载荷无效',
+        'invalid-result-payload': '结果载荷无效',
+        'missing-terminal-payload': '缺少终态载荷',
+        'multiple-terminal-payloads': '终态载荷冲突',
+        upstream_api_error: '上游接口错误',
+        unsafe_auto_commit_dirty_paths: '工作区存在脏文件，禁止自动提交',
+        timeout: '超时',
+      },
+    },
+  },
+  en: {
+    htmlLang: 'en',
+    pageTitle: 'Governance Hierarchy Studio',
+    toolbarEyebrow: 'Taskplane',
+    toolbarTitle: 'Governance Hierarchy Studio',
+    toolbarSummary: 'Load one repository to inspect epic, story, and task topology, then review issue details on the right.',
+    toolbarStatusHint: 'Backend contracts stay unchanged',
+    waiting: 'Waiting for hierarchy load',
+    repoLabel: 'Repository',
+    load: 'Load Governance View',
+    focus: 'Focus Detail Panel',
+    summaryLabel: 'Governance summary',
+    repoContextEyebrow: 'Current context',
+    repoHeadingEmpty: 'Select a repository',
+    repoSummaryEmpty: 'Load a repository to inspect the current governance tree and spot stories or tasks outside their parent lineage.',
+    metricRootLabel: 'Root scope',
+    metricRootHint: 'Repository root and governance groups',
+    metricOrphanLabel: 'Orphan groups',
+    metricOrphanHint: 'Stories / tasks outside epic lineage',
+    guideEyebrow: 'Guide',
+    guideTitle: 'How to read this view',
+    guideItems: ['Click numbered nodes to inspect governance detail.', 'Root and orphan groups still collapse and expand.', 'Use the right panel to review relations and execution state.'],
+    legendEyebrow: 'Legend',
+    legendTitle: 'Hierarchy and status markers',
+    workspaceLabel: 'Hierarchy workspace',
+    workspaceEyebrow: 'Hierarchy workspace',
+    workspaceTitle: 'Governance execution topology',
+    workspaceDescription: 'Use the left side for topology and the right side for issue diagnostics.',
+    treeMetaRepo: ({ repo }) => `Repo: ${repo}`,
+    treeMetaSelection: ({ label }) => `Selection: ${label}`,
+    workspaceGuidanceTitle: 'Operator guidance',
+    workspaceGuidanceDefault: 'Expand epic branches first, then confirm execution state and relations in the detail panel.',
+    treeTip: 'Scroll to zoom · Drag to pan · Click a node for detail',
+    spinner: 'Loading governance hierarchy...',
+    detailPanelLabel: 'Issue diagnostics panel',
+    detailEyebrow: 'Issue diagnostics',
+    detailPanelTitle: 'Governance detail panel',
+    detailPanelHint: 'Select a numbered node to review context, relations, and runtime status here.',
+    closePanelAria: 'Close detail panel',
+    drawerIdleTitle: 'Select a numbered issue',
+    drawerIdleBody: 'Keep the tree visible and use this panel to inspect the selected issue.',
+    drawerIdleBullets: ['Click epic, story, or task nodes to load detail.', 'Root and orphan groups still collapse and expand.', 'Prefilled repositories still auto-load on open.'],
+    statusLoadingTree: ({ repo }) => `Loading hierarchy for ${repo}`,
+    statusLoadedTree: ({ repo }) => `Loaded hierarchy for ${repo}`,
+    statusLoadFailed: ({ message }) => `Load failed: ${message}`,
+    render: {
+      idleEyebrow: 'Issue diagnostics',
+      loadingTitle: ({ number }) => `Loading issue #${number}`,
+      loadingBody: 'Fetching governance metadata and execution state for the selected issue.',
+      loadingMeta: 'The tree remains interactive while detail refreshes.',
+      errorTitle: 'Unable to load issue detail',
+      errorBody: 'Check the current repository context and try again.',
+      hierarchyErrorEyebrow: 'Hierarchy status',
+      hierarchyErrorTitle: 'Unable to load governance hierarchy',
+      hierarchyErrorBody: ({ repo }) => `Unable to load hierarchy data for ${repo || 'the current repository'}.`,
+      hierarchyErrorBullets: ['Confirm the repository uses owner/repo format.', 'Retry after the hierarchy API is reachable again.', 'If a previous load succeeded, you can keep reviewing the current tree.'],
+      requestError: ({ message }) => `Request error: ${message}`,
+      repoSummaryLoaded: ({ epicCount, orphanStories, orphanTasks }) => `This repository has ${epicCount} epic roots, ${orphanStories} orphan stories, and ${orphanTasks} orphan tasks.`,
+      workspaceGuidanceWithOrphans: 'This repository contains orphan groups. Check governance links first.',
+      workspaceGuidanceClean: 'No orphan groups are currently surfaced. Review epic lineage directly.',
+      orphanStories: 'Orphan Stories',
+      orphanTasks: 'Orphan Tasks',
+      group: 'group',
+      selectedIssue: 'Selected issue',
+      detailIntro: 'Review governance lineage before jumping into execution tooling.',
+      lane: 'Lane',
+      complexity: 'Complexity',
+      executionStatus: 'Execution status',
+      workItemWave: 'Work item / wave',
+      notProjected: 'Not projected to work_item',
+      repositoryIssue: 'Repository issue',
+      openGithub: 'Open GitHub Issue',
+      blockedBanner: ({ reason }) => `Execution is blocked: ${reason}`,
+      decisionBanner: 'Operator review is required before automation continues.',
+      description: 'Description',
+      parentLineage: 'Parent lineage',
+      governanceParent: 'Governance parent',
+      relations: 'Relations',
+      relationFallback: 'relation',
+      executionDiagnostics: 'Execution diagnostics',
+      status: 'Status',
+      wave: 'Wave',
+      workItemId: 'Work item ID',
+      decisionGate: 'Decision gate',
+      needsOperatorDecision: 'Needs operator decision',
+      legend: ['Epic', 'Story', 'Task', 'Pending', 'Ready', 'Blocked', 'In progress', 'Done'],
+      issueKinds: { epic: 'Epic', story: 'Story', task: 'Task', group: 'Group', root: 'Root', unknown: 'Unknown' },
+      statuses: { pending: 'Pending', ready: 'Ready', in_progress: 'In progress', verifying: 'Verifying', blocked: 'Blocked', done: 'Done', unknown: 'Unknown' },
+      githubStates: { open: 'Open', closed: 'Closed' },
+      taskTypes: { core_path: 'Core Path', cross_cutting: 'Cross-cutting', documentation: 'Documentation', governance: 'Governance' },
+      relationTypes: { blocked_by: 'Blocked by', blocks: 'Blocks', depends_on: 'Depends on', parent: 'Parent', parent_candidate: 'Parent Candidate' },
+      reasonCodes: {
+        waiting_for_retry: 'Waiting for Retry',
+        interrupted_retryable: 'Interrupted, Retryable',
+        credential_required: 'Credential Required',
+        tooling_error: 'Tooling Error',
+        protocol_error: 'Protocol Error',
+        missing_approval: 'Missing Approval',
+        invalid_result_payload: 'Invalid Result Payload',
+        'invalid-result-payload': 'Invalid Result Payload',
+        'missing-terminal-payload': 'Missing Terminal Payload',
+        'multiple-terminal-payloads': 'Conflicting Terminal Payloads',
+        upstream_api_error: 'Upstream API Error',
+        unsafe_auto_commit_dirty_paths: 'Dirty Paths Block Auto Commit',
+        timeout: 'Timeout',
+      },
+    },
+  },
+};
+
+function t(path, values = {}) {
+  const parts = path.split('.');
+  let current = TRANSLATIONS[currentLocale] || TRANSLATIONS.zh;
+  for (const part of parts) current = current && current[part];
+  if (typeof current === 'function') return current(values);
+  return current ?? path;
+}
+
+function localizeStatus(status) {
+  const key = String(status || 'unknown');
+  return t(`render.statuses.${key}`);
+}
+
+function localizeIssueKind(kind) {
+  const key = String(kind || 'unknown');
+  return t(`render.issueKinds.${key}`);
+}
+
+function localizeGithubState(stateValue) {
+  const key = String(stateValue || 'unknown');
+  const localized = t(`render.githubStates.${key}`);
+  return localized === `render.githubStates.${key}` ? key : localized;
+}
+
+function prettifyToken(value) {
+  return String(value || '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function localizeTaskType(taskType) {
+  const key = String(taskType || '');
+  const localized = t(`render.taskTypes.${key}`);
+  return localized === `render.taskTypes.${key}` ? (key || t('render.statuses.unknown')) : localized;
+}
+
+function localizeReason(reason) {
+  const key = String(reason || '');
+  const localized = t(`render.reasonCodes.${key}`);
+  return localized === `render.reasonCodes.${key}` ? (key ? prettifyToken(key) : t('render.statuses.unknown')) : localized;
+}
+
+function localizeRelationType(relationType) {
+  const key = String(relationType || '');
+  const localized = t(`render.relationTypes.${key}`);
+  return localized === `render.relationTypes.${key}` ? (key ? prettifyToken(key) : t('render.statuses.unknown')) : localized;
+}
+
+function setLocale(locale) {
+  if (!TRANSLATIONS[locale]) return;
+  currentLocale = locale;
+  try { window.localStorage.setItem(LOCALE_STORAGE_KEY, locale); } catch (error) {}
+  applyStaticLocale();
+  renderLegend();
+  setTreeSelectionLabel(currentSelection ? `#${currentSelection}` : null);
+  if (!currentTreeData) {
+    document.getElementById('detail-content').innerHTML = renderDetailIdleState();
+    return;
+  }
+  buildTree(currentTreeData);
+}
+
+function applyStaticLocale() {
+  document.documentElement.lang = t('htmlLang');
+  document.title = t('pageTitle');
+  document.getElementById('toolbar-eyebrow').textContent = t('toolbarEyebrow');
+  document.getElementById('toolbar-title').textContent = t('toolbarTitle');
+  document.getElementById('toolbar-summary').textContent = t('toolbarSummary');
+  document.getElementById('toolbar-status-hint').innerHTML = `<span class="status-dot"></span>${escapeHtml(t('toolbarStatusHint'))}`;
+  document.getElementById('repo-label').textContent = t('repoLabel');
+  document.getElementById('load-btn').textContent = t('load');
+  document.getElementById('focus-detail-btn').textContent = t('focus');
+  document.getElementById('summary-panel').setAttribute('aria-label', t('summaryLabel'));
+  document.getElementById('repo-context-eyebrow').textContent = t('repoContextEyebrow');
+  document.getElementById('guide-eyebrow').textContent = t('guideEyebrow');
+  document.getElementById('guide-title').textContent = t('guideTitle');
+  document.getElementById('guide-list').innerHTML = t('guideItems').map(item => `<li>${escapeHtml(item)}</li>`).join('');
+  document.getElementById('legend-eyebrow').textContent = t('legendEyebrow');
+  document.getElementById('legend-title').textContent = t('legendTitle');
+  document.getElementById('workspace-panel-label').setAttribute('aria-label', t('workspaceLabel'));
+  document.getElementById('workspace-eyebrow').textContent = t('workspaceEyebrow');
+  document.getElementById('workspace-title').textContent = t('workspaceTitle');
+  document.getElementById('workspace-description').textContent = t('workspaceDescription');
+  document.getElementById('workspace-guidance-title').textContent = t('workspaceGuidanceTitle');
+  document.getElementById('tree-tip').textContent = t('treeTip');
+  document.getElementById('spinner').textContent = t('spinner');
+  document.getElementById('detail-panel').setAttribute('aria-label', t('detailPanelLabel'));
+  document.getElementById('detail-eyebrow').textContent = t('detailEyebrow');
+  document.getElementById('detail-panel-title').textContent = t('detailPanelTitle');
+  document.getElementById('detail-panel-hint').textContent = t('detailPanelHint');
+  document.getElementById('close-panel').setAttribute('aria-label', t('closePanelAria'));
+  if (!currentTreeData) {
+    document.getElementById('repo-heading').textContent = t('repoHeadingEmpty');
+    document.getElementById('repo-summary').textContent = t('repoSummaryEmpty');
+    document.getElementById('metric-root-label').textContent = t('metricRootLabel');
+    document.getElementById('metric-root-hint').textContent = t('metricRootHint');
+    document.getElementById('metric-orphan-label').textContent = t('metricOrphanLabel');
+    document.getElementById('metric-orphan-hint').textContent = t('metricOrphanHint');
+    document.getElementById('workspace-guidance').textContent = t('workspaceGuidanceDefault');
+    document.getElementById('detail-content').innerHTML = renderDetailIdleState();
+  }
+  updateLocaleButtons();
+}
+
+function updateLocaleButtons() {
+  document.getElementById('locale-zh-btn').classList.toggle('button--primary', currentLocale === 'zh');
+  document.getElementById('locale-zh-btn').classList.toggle('button--ghost', currentLocale !== 'zh');
+  document.getElementById('locale-en-btn').classList.toggle('button--primary', currentLocale === 'en');
+  document.getElementById('locale-en-btn').classList.toggle('button--ghost', currentLocale !== 'en');
+}
+
+function renderDrawerState({ tone = 'idle', eyebrow, title, body, bullets = [], meta = '' }) {
+  const variantClass = tone === 'loading'
+    ? 'inline-state inline-state--loading'
+    : tone === 'error'
+      ? 'inline-state inline-state--error'
+      : 'empty-state';
+  const bodyClass = tone === 'idle' ? '' : ' class="inline-state__body"';
+  const bulletClass = tone === 'idle' ? '' : ' class="inline-state__list"';
+  const metaHtml = meta ? `<p class="inline-state__meta">${escapeHtml(meta)}</p>` : '';
+  const bulletHtml = bullets.length
+    ? `<ul${bulletClass}>${bullets.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
+    : '';
+  return `
+    <div class="${variantClass}">
+      <p class="${tone === 'idle' ? 'eyebrow' : 'inline-state__eyebrow'}"${tone === 'idle' ? ' style="color:#64748b"' : ''}>${escapeHtml(eyebrow)}</p>
+      <h3 class="${tone === 'idle' ? '' : 'inline-state__title'}">${escapeHtml(title)}</h3>
+      <p${bodyClass}>${body}</p>
+      ${bulletHtml}
+      ${metaHtml}
+    </div>
+  `;
+}
+
+function renderDetailIdleState() {
+  return renderDrawerState({
+    tone: 'idle',
+    eyebrow: t('render.idleEyebrow'),
+    title: t('drawerIdleTitle'),
+    body: t('drawerIdleBody'),
+    bullets: t('drawerIdleBullets')
+  });
+}
+
+function renderDetailLoadingState(number) {
+  return renderDrawerState({
+    tone: 'loading',
+    eyebrow: t('render.idleEyebrow'),
+    title: t('render.loadingTitle', { number }),
+    body: t('render.loadingBody'),
+    meta: t('render.loadingMeta')
+  });
+}
+
+function renderDetailErrorState(message) {
+  return renderDrawerState({
+    tone: 'error',
+    eyebrow: t('render.idleEyebrow'),
+    title: t('render.errorTitle'),
+    body: t('render.errorBody'),
+    meta: t('render.requestError', { message })
+  });
+}
+
+function renderHierarchyErrorState(repo, message) {
+  return renderDrawerState({
+    tone: 'error',
+    eyebrow: t('render.hierarchyErrorEyebrow'),
+    title: t('render.hierarchyErrorTitle'),
+    body: t('render.hierarchyErrorBody', { repo: escapeHtml(repo || '') }),
+    bullets: t('render.hierarchyErrorBullets'),
+    meta: t('render.requestError', { message })
+  });
+}
+
+function nodeColor(d) {
+  const ws = d.data.work_status;
+  if (ws && STATUS_COLOR[ws]) return STATUS_COLOR[ws];
+  return KIND_COLOR[d.data.issue_kind] || '#94a3b8';
+}
+
+function nodeR(d) {
+  return KIND_R[d.data.issue_kind] || 7;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, char => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[char]));
+}
+
+function setStatus(message, tone) {
+  const el = document.getElementById('connection-state');
+  el.className = 'status-pill';
+  if (tone === 'loading') el.classList.add('is-loading');
+  if (tone === 'error') el.classList.add('is-error');
+  if (tone === 'ready') el.classList.add('is-ready');
+  el.innerHTML = `<span class="status-dot"></span>${escapeHtml(message)}`;
+}
+
+function renderLegend() {
+  const entries = [
+    [t('render.legend')[0], KIND_COLOR.epic],
+    [t('render.legend')[1], KIND_COLOR.story],
+    [t('render.legend')[2], KIND_COLOR.task],
+    [t('render.legend')[3], STATUS_COLOR.pending],
+    [t('render.legend')[4], STATUS_COLOR.ready],
+    [t('render.legend')[5], STATUS_COLOR.blocked],
+    [t('render.legend')[6], STATUS_COLOR.in_progress],
+    [t('render.legend')[7], STATUS_COLOR.done],
+  ];
+  document.getElementById('legend-grid').innerHTML = entries.map(([label, color]) => `
+    <span class="legend-pill"><span class="legend-swatch" style="background:${color}"></span>${label}</span>
+  `).join('');
+}
+
+function computeTreeStats(data) {
+  const epicCount = Array.isArray(data.epics) ? data.epics.length : 0;
+  const orphanStories = Array.isArray(data.orphan_stories) ? data.orphan_stories.length : 0;
+  const orphanTasks = Array.isArray(data.orphan_tasks) ? data.orphan_tasks.length : 0;
+  return {
+    epicCount,
+    orphanStories,
+    orphanTasks,
+    orphanGroups: Number(Boolean(orphanStories)) + Number(Boolean(orphanTasks)),
+  };
+}
+
+function updateWorkspaceSummary(data) {
+  const stats = computeTreeStats(data);
+  const repoLabel = currentRepo || t('repoHeadingEmpty');
+  document.getElementById('repo-heading').textContent = repoLabel;
+  document.getElementById('repo-summary').textContent = t('render.repoSummaryLoaded', stats);
+  document.getElementById('metric-root-scope').textContent = stats.epicCount;
+  document.getElementById('metric-orphans').textContent = `${stats.orphanStories + stats.orphanTasks}`;
+  document.getElementById('metric-root-label').textContent = t('metricRootLabel');
+  document.getElementById('metric-root-hint').textContent = t('metricRootHint');
+  document.getElementById('metric-orphan-label').textContent = t('metricOrphanLabel');
+  document.getElementById('metric-orphan-hint').textContent = t('metricOrphanHint');
+  document.getElementById('tree-meta-repo').textContent = t('treeMetaRepo', { repo: repoLabel });
+  document.getElementById('workspace-guidance').textContent = stats.orphanGroups
+    ? t('render.workspaceGuidanceWithOrphans')
+    : t('render.workspaceGuidanceClean');
+}
+
+function setTreeSelectionLabel(label) {
+  document.getElementById('tree-meta-selection').textContent = t('treeMetaSelection', { label: label || (currentLocale === 'zh' ? '无' : 'none') });
+}
+
+function buildTree(data) {
+  currentTreeData = data;
+  updateWorkspaceSummary(data);
+
+  const rootData = {
+    issue_number: 0,
+    title: currentRepo,
+    issue_kind: 'root',
+    children: [
+      ...data.epics,
+      ...(data.orphan_stories.length ? [{
+        issue_number: -1,
+        title: t('render.orphanStories'),
+        issue_kind: 'group',
+        children: data.orphan_stories,
+      }] : []),
+      ...(data.orphan_tasks.length ? [{
+        issue_number: -2,
+        title: t('render.orphanTasks'),
+        issue_kind: 'group',
+        children: data.orphan_tasks,
+      }] : []),
+    ]
+  };
+
+  const container = document.getElementById('tree-container');
+  container.innerHTML = `<div class="spinner" id="spinner" style="display:none">${escapeHtml(t('spinner'))}</div>`;
+  const W = container.clientWidth;
+  const H = container.clientHeight;
+  const margin = { top: 40, right: 220, bottom: 40, left: 96 };
+  const w = W - margin.left - margin.right;
+  const h = H - margin.top - margin.bottom;
+
+  const svg = d3.select('#tree-container').append('svg')
+    .attr('width', W)
+    .attr('height', H);
+  const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+  svg.call(d3.zoom().scaleExtent([0.1, 4]).on('zoom', event => g.attr('transform', event.transform)));
+
+  const root = d3.hierarchy(rootData, d => d._collapsed ? null : d.children);
+  root.x0 = h / 2;
+  root.y0 = 0;
+
+  const treeLayout = d3.tree().size([h, w]);
+
+  function update(source) {
+    treeLayout(root);
+    const nodes = root.descendants();
+    const links = root.links();
+
+    nodes.forEach(d => { d.y = d.depth * 220; });
+
+    const link = g.selectAll('.link').data(links, d => d.target.data.issue_number);
+    link.enter().append('path').attr('class', 'link')
+      .attr('d', d3.linkHorizontal().x(d => d.y).y(d => d.x))
+      .merge(link)
+      .transition().duration(300)
+      .attr('d', d3.linkHorizontal().x(d => d.y).y(d => d.x));
+    link.exit().remove();
+
+    const node = g.selectAll('.node').data(nodes, d => d.data.issue_number);
+    const nodeEnter = node.enter().append('g').attr('class', 'node')
+      .attr('transform', d => `translate(${source.y0},${source.x0})`);
+
+    nodeEnter.append('circle')
+      .attr('r', nodeR)
+      .attr('fill', nodeColor)
+      .attr('stroke', d => d3.color(nodeColor(d)).darker(0.8))
+      .on('click', (event, d) => {
+        event.stopPropagation();
+        if (d.data.issue_kind === 'root' || d.data.issue_kind === 'group') {
+          d.data._collapsed = !d.data._collapsed;
+          setTreeSelectionLabel(d.data.title || t('render.group'));
+          update(d);
+          return;
+        }
+        loadDetail(d.data.issue_number);
+      })
+      .on('mouseover', (event, d) => {
+        const tt = document.getElementById('tooltip');
+        tt.style.display = 'block';
+        tt.style.left = `${event.pageX + 12}px`;
+        tt.style.top = `${event.pageY - 8}px`;
+        tt.textContent = `#${d.data.issue_number} ${d.data.title}`;
+      })
+      .on('mouseout', () => {
+        document.getElementById('tooltip').style.display = 'none';
+      });
+
+    nodeEnter.append('text')
+      .attr('dy', '0.32em')
+      .attr('x', d => nodeR(d) + 7)
+      .attr('text-anchor', 'start')
+      .text(d => {
+        if (d.data.issue_kind === 'root') return '';
+        if (d.data.issue_kind === 'group') return d.data.title;
+        const label = d.data.issue_number > 0 ? `#${d.data.issue_number} ` : '';
+        const title = d.data.title || '';
+        return label + (title.length > 34 ? `${title.slice(0, 34)}…` : title);
+      })
+      .on('click', (event, d) => {
+        event.stopPropagation();
+        if (d.data.issue_number > 0) loadDetail(d.data.issue_number);
+      });
+
+    const nodeUpdate = nodeEnter.merge(node);
+    nodeUpdate.transition().duration(300)
+      .attr('transform', d => `translate(${d.y},${d.x})`);
+    nodeUpdate.select('circle')
+      .attr('fill', nodeColor)
+      .attr('r', nodeR)
+      .attr('stroke', d => d3.color(nodeColor(d)).darker(0.8));
+
+    node.exit().transition().duration(200)
+      .attr('transform', d => `translate(${source.y},${source.x})`)
+      .remove();
+
+    nodes.forEach(d => {
+      d.x0 = d.x;
+      d.y0 = d.y;
+    });
+  }
+
+  update(root);
+}
+
+function renderDetail(d) {
+  const kindColors = { epic: '#3b82f6', story: '#10b981', task: '#6366f1' };
+  const kc = kindColors[d.issue_kind] || '#94a3b8';
+  const sc = d.work_item ? (STATUS_COLOR[d.work_item.status] || '#94a3b8') : null;
+  const statusBadge = d.work_item ? `<span class="badge" style="background:${sc}20;color:${sc}">${escapeHtml(localizeStatus(d.work_item.status))}</span>` : '';
+  const githubBadge = d.github_state ? `<span class="badge" style="background:#f1f5f9;color:#475569">${escapeHtml(localizeGithubState(d.github_state))}</span>` : '';
+  const laneValue = d.lane || '—';
+  const complexityValue = d.complexity || '—';
+  const workId = d.work_item && d.work_item.id ? d.work_item.id : '—';
+  const waveValue = d.work_item && d.work_item.wave ? d.work_item.wave : '—';
+  const executionStatus = d.work_item && d.work_item.status ? localizeStatus(d.work_item.status) : t('render.notProjected');
+
+  let html = '<div class="detail-stack">';
+  html += '<div class="detail-topline">';
+  html += `<div class="detail-heading-block"><p class="eyebrow" style="color:#64748b">${escapeHtml(t('render.selectedIssue'))}</p><h3>#${escapeHtml(d.issue_number)} ${escapeHtml(d.title || '')}</h3><p>${escapeHtml(t('render.detailIntro'))}</p></div>`;
+  html += '</div>';
+
+  html += '<div class="badge-row">';
+  html += `<span class="badge" style="background:${kc}20;color:${kc}">${escapeHtml(localizeIssueKind(d.issue_kind))}</span>`;
+  html += githubBadge;
+  html += statusBadge;
+  html += '</div>';
+
+  html += '<div class="detail-meta-grid">';
+  html += `<div class="meta-card"><span class="meta-card__label">${escapeHtml(t('render.lane'))}</span><span class="meta-card__value">${escapeHtml(laneValue)}</span></div>`;
+  html += `<div class="meta-card"><span class="meta-card__label">${escapeHtml(t('render.complexity'))}</span><span class="meta-card__value">${escapeHtml(complexityValue)}</span></div>`;
+  html += `<div class="meta-card"><span class="meta-card__label">${escapeHtml(t('render.executionStatus'))}</span><span class="meta-card__value">${escapeHtml(executionStatus)}</span></div>`;
+  html += `<div class="meta-card"><span class="meta-card__label">${escapeHtml(t('render.workItemWave'))}</span><span class="meta-card__value">${escapeHtml(workId)} · ${escapeHtml(waveValue)}</span></div>`;
+  html += '</div>';
+
+  if (d.url) {
+    html += '<div class="detail-section">';
+    html += `<div class="detail-section__header"><h4>${escapeHtml(t('render.repositoryIssue'))}</h4></div>`;
+    html += `<div class="detail-section__body"><a class="gh-link" href="${escapeHtml(d.url)}" target="_blank" rel="noopener noreferrer">↗ ${escapeHtml(t('render.openGithub'))}</a></div>`;
+    html += '</div>';
+  }
+
+  if (d.work_item && d.work_item.blocked_reason) {
+    html += `<div class="diagnostic-banner diagnostic-banner--danger">${escapeHtml(t('render.blockedBanner', { reason: d.work_item.blocked_reason }))}</div>`;
+  }
+  if (d.work_item && d.work_item.decision_required) {
+    html += `<div class="diagnostic-banner diagnostic-banner--warning">${escapeHtml(t('render.decisionBanner'))}</div>`;
+  }
+
+  if (d.body) {
+    html += '<section class="detail-section">';
+    html += `<div class="detail-section__header"><h4>${escapeHtml(t('render.description'))}</h4></div>`;
+    html += `<div class="detail-section__body"><div class="detail-body-text">${escapeHtml(d.body)}</div></div>`;
+    html += '</section>';
+  }
+
+  if (d.parents && d.parents.length) {
+    html += '<section class="detail-section">';
+    html += `<div class="detail-section__header"><h4>${escapeHtml(t('render.parentLineage'))}</h4></div>`;
+    html += '<div class="detail-section__body"><div class="rel-list">';
+    d.parents.forEach(parent => {
+      html += `<div class="rel-item"><span class="rel-item__label">#${escapeHtml(parent)}</span><span class="rel-item__meta">${escapeHtml(t('render.governanceParent'))}</span></div>`;
+    });
+    html += '</div></div></section>';
+  }
+
+  if (d.relations && d.relations.length) {
+    html += '<section class="detail-section">';
+    html += `<div class="detail-section__header"><h4>${escapeHtml(t('render.relations'))}</h4></div>`;
+    html += '<div class="detail-section__body"><div class="rel-list">';
+    d.relations.forEach(rel => {
+      const arrow = rel.dir === 'outgoing' ? '→' : '←';
+      html += `<div class="rel-item"><span class="rel-item__label">${arrow} #${escapeHtml(rel.number)}</span><span class="rel-item__meta">${escapeHtml(rel.type ? localizeRelationType(rel.type) : t('render.relationFallback'))}</span></div>`;
+    });
+    html += '</div></div></section>';
+  }
+
+  if (d.work_item) {
+    html += '<section class="detail-section">';
+    html += `<div class="detail-section__header"><h4>${escapeHtml(t('render.executionDiagnostics'))}</h4></div>`;
+    html += '<div class="detail-section__body"><div class="rel-list">';
+      html += `<div class="rel-item"><span class="rel-item__label">${escapeHtml(t('render.status'))}</span><span class="rel-item__meta">${escapeHtml(localizeStatus(d.work_item.status))}</span></div>`;
+      html += `<div class="rel-item"><span class="rel-item__label">${escapeHtml(t('render.wave'))}</span><span class="rel-item__meta">${escapeHtml(waveValue)}</span></div>`;
+      html += `<div class="rel-item"><span class="rel-item__label">${escapeHtml(t('render.workItemId'))}</span><span class="rel-item__meta">${escapeHtml(workId)}</span></div>`;
+      if (d.work_item.task_type) {
+        html += `<div class="rel-item"><span class="rel-item__label">${escapeHtml(currentLocale === 'zh' ? '任务类型' : 'Task Type')}</span><span class="rel-item__meta">${escapeHtml(localizeTaskType(d.work_item.task_type))}</span></div>`;
+      }
+      if (d.work_item.blocked_reason) {
+        html += `<div class="rel-item"><span class="rel-item__label">${escapeHtml(currentLocale === 'zh' ? '阻塞原因' : 'Blocked Reason')}</span><span class="rel-item__meta">${escapeHtml(localizeReason(d.work_item.blocked_reason))}</span></div>`;
+      }
+    if (d.work_item.decision_required) {
+      html += `<div class="rel-item"><span class="rel-item__label">${escapeHtml(t('render.decisionGate'))}</span><span class="rel-item__meta">${escapeHtml(t('render.needsOperatorDecision'))}</span></div>`;
+    }
+    html += '</div></div></section>';
+  }
+
+  html += '</div>';
+  return html;
+}
+
+function loadDetail(number) {
+  currentSelection = number;
+  setTreeSelectionLabel(`#${number}`);
+  const content = document.getElementById('detail-content');
+  content.className = '';
+  content.innerHTML = renderDetailLoadingState(number);
+  fetch(`/api/issue/${number}?repo=${encodeURIComponent(currentRepo)}`)
+    .then(r => r.json())
+    .then(data => {
+      content.className = '';
+      content.innerHTML = renderDetail(data);
+    })
+    .catch(err => {
+      content.className = '';
+      content.innerHTML = renderDetailErrorState(err.message);
+    });
+}
+
+function loadHierarchy() {
+  const repo = document.getElementById('repo-input').value.trim();
+  if (!repo) return;
+  currentRepo = repo;
+  currentSelection = null;
+  setTreeSelectionLabel(null);
+  const spinner = document.getElementById('spinner');
+  spinner.style.display = 'flex';
+  setStatus(t('statusLoadingTree', { repo }), 'loading');
+  fetch(`/api/hierarchy?repo=${encodeURIComponent(repo)}`)
+    .then(r => r.json())
+    .then(data => {
+      spinner.style.display = 'none';
+      buildTree(data);
+      setStatus(t('statusLoadedTree', { repo }), 'ready');
+    })
+    .catch(err => {
+      spinner.style.display = 'none';
+      setStatus(t('statusLoadFailed', { message: err.message }), 'error');
+      const content = document.getElementById('detail-content');
+      content.className = '';
+      content.innerHTML = renderHierarchyErrorState(repo, err.message);
+    });
+}
+
+document.getElementById('close-panel').addEventListener('click', () => {
+  currentSelection = null;
+  setTreeSelectionLabel(null);
+  document.getElementById('detail-content').className = '';
+  document.getElementById('detail-content').innerHTML = renderDetailIdleState();
+});
+
+document.getElementById('focus-detail-btn').addEventListener('click', () => {
+  document.getElementById('detail-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
+document.getElementById('locale-zh-btn').addEventListener('click', () => setLocale('zh'));
+document.getElementById('locale-en-btn').addEventListener('click', () => setLocale('en'));
+
+document.getElementById('load-btn').addEventListener('click', loadHierarchy);
+document.getElementById('repo-input').addEventListener('keydown', event => {
+  if (event.key === 'Enter') loadHierarchy();
+});
+
+applyStaticLocale();
+renderLegend();
+document.getElementById('detail-content').className = '';
+document.getElementById('detail-content').innerHTML = renderDetailIdleState();
+
+const preRepo = document.getElementById('repo-input').value.trim();
+if (preRepo && preRepo !== '') {
+  currentRepo = preRepo;
+  loadHierarchy();
+}
+</script>
+</body>
+</html>

@@ -1,11 +1,11 @@
-from stardrifter_orchestration_mvp.models import CompletionAudit, GitHubTaskProjection, WorkItem
-from stardrifter_orchestration_mvp.triage_report import TriageReport
-from stardrifter_orchestration_mvp.triage_report_cli import main
+from taskplane.models import CompletionAudit, GitHubTaskProjection, WorkItem
+from taskplane.triage_report import TriageReport
+from taskplane.triage_report_cli import main
 
 
 def test_triage_report_cli_prints_summary(monkeypatch, capsys):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
 

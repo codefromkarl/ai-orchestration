@@ -1,6 +1,6 @@
 import json
 
-from stardrifter_orchestration_mvp.github_sync import (
+from taskplane.github_sync import (
     fetch_issues_via_gh,
     persist_issue_import_batch,
 )

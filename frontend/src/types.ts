@@ -13,6 +13,7 @@ export type ConsoleNavSection = 'overview' | 'detail';
 export type WorkspaceViewId =
   | 'epic_overview'
   | 'running_jobs'
+  | 'runtime_observability'
   | 'task_repository'
   | 'command_center'
   | 'story_tree'
@@ -225,6 +226,27 @@ export interface DrawerDetailItem {
   priority?: Priority;
   metaSummary?: string;
   snapshotState?: TaskSnapshotState;
+  runtimeSessions?: Array<{
+    id: string;
+    status?: string;
+    attemptIndex?: number;
+    currentPhase?: string;
+    waitingReason?: string | null;
+    updatedAt?: string;
+    checkpointSummary?: string | null;
+    checkpointNextAction?: string | null;
+  }>;
+  artifacts?: Array<{
+    id: number;
+    sessionId?: string | null;
+    runId?: number | null;
+    artifactType?: string;
+    artifactKey?: string;
+    mimeType?: string;
+    contentSizeBytes?: number;
+    summary?: string;
+    createdAt?: string;
+  }>;
   storySummaries?: EpicDetailStorySummary[];
   taskSummaries?: Array<{
     workId: string;
@@ -250,6 +272,32 @@ export interface RunningJobSummary {
   command?: string;
   log_path?: string;
   started_at?: string;
+}
+
+export interface RuntimeObservationItem {
+  workId: string;
+  issueNumber?: number;
+  title: string;
+  status?: TaskStatus;
+  lane?: string;
+  wave?: string;
+  blockedReason?: string | null;
+  decisionRequired?: boolean;
+  lastFailureReason?: string | null;
+  workerName?: string | null;
+  sessionId?: string | null;
+  sessionStatus?: string | null;
+  sessionAttemptIndex?: number | null;
+  sessionCurrentPhase?: string | null;
+  sessionWaitingReason?: string | null;
+  sessionUpdatedAt?: string | null;
+  checkpointSummary?: string | null;
+  checkpointNextAction?: string | null;
+  artifactId?: number | null;
+  artifactType?: string | null;
+  artifactKey?: string | null;
+  artifactSummary?: string;
+  artifactCreatedAt?: string | null;
 }
 
 export interface JobDetailResponse {

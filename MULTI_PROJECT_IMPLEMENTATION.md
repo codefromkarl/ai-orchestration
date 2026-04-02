@@ -61,19 +61,19 @@
 
 ```bash
 # 顺序应用所有迁移
-psql -h localhost -U stardrifter -d stardrifter_orchestration -f sql/001_parallel_execution_extensions.sql
-psql -h localhost -U stardrifter -d stardrifter_orchestration -f sql/002_global_coordination.sql
-psql -h localhost -U stardrifter -d stardrifter_orchestration -f sql/003_ui_enhancements.sql
+psql -h localhost -U stardrifter -d taskplane -f sql/001_parallel_execution_extensions.sql
+psql -h localhost -U stardrifter -d taskplane -f sql/002_global_coordination.sql
+psql -h localhost -U stardrifter -d taskplane -f sql/003_ui_enhancements.sql
 
 # 或单独应用缺失的表（如果已应用 001）
-psql -h localhost -U stardrifter -d stardrifter_orchestration -f sql/apply_001.sql
+psql -h localhost -U stardrifter -d taskplane -f sql/apply_001.sql
 ```
 
 详细迁移指南见 `sql/MIGRATION_GUIDE.md`
 
 ### Phase 2: Global Coordinator 核心模块 ✅
 
-**文件：** `src/stardrifter_orchestration_mvp/global_coordinator.py`
+**文件：** `src/taskplane/global_coordinator.py`
 
 核心功能：
 - `get_global_status()` - 获取所有 Repo 状态
@@ -81,18 +81,18 @@ psql -h localhost -U stardrifter -d stardrifter_orchestration -f sql/apply_001.s
 - `acquire_agent_slot()` / `release_agent_slot()` - Agent 槽位管理
 - `acquire_path_lock()` / `release_path_lock()` - 路径锁管理
 
-**文件：** `src/stardrifter_orchestration_mvp/agent_pool_manager.py`
+**文件：** `src/taskplane/agent_pool_manager.py`
 
 Agent 池管理：
 - 基础配额管理（每 Repo 最少 N 个 Agent）
 - 弹性池分配（共享剩余 Agent）
 - Agent 健康检查
 
-**文件：** `src/stardrifter_orchestration_mvp/global_coordinator_cli.py`
+**文件：** `src/taskplane/global_coordinator_cli.py`
 
 CLI 入口：
 ```bash
-python -m stardrifter_orchestration_mvp.global_coordinator_cli \
+python -m taskplane.global_coordinator_cli \
     --max-global-parallel 10 \
     --repos repo-a repo-b repo-c \
     --base-quota 2 \
@@ -102,7 +102,7 @@ python -m stardrifter_orchestration_mvp.global_coordinator_cli \
 
 ### Phase 3: UI API 增强 ✅
 
-**文件：** `src/stardrifter_orchestration_mvp/console_read_api.py`
+**文件：** `src/taskplane/console_read_api.py`
 
 新增 API 端点：
 
@@ -116,7 +116,7 @@ python -m stardrifter_orchestration_mvp.global_coordinator_cli \
 
 ### Phase 4: UI 前端增强 ✅
 
-**文件：** `src/stardrifter_orchestration_mvp/static/console.html`
+**文件：** `src/taskplane/static/console.html`
 
 新增面板：
 1. **Portfolio Section** - 多项目总览卡片
@@ -124,7 +124,7 @@ python -m stardrifter_orchestration_mvp.global_coordinator_cli \
 3. **Notification Panel** - 通知中心（标签页：Pending/Sent/Failed）
 4. **Agent Console Panel** - Agent 状态表格
 
-**文件：** `src/stardrifter_orchestration_mvp/static/console.js`（历史实现，现已被 React bundle 主路径替代）
+**文件：** `src/taskplane/static/console.js`（历史实现，现已被 React bundle 主路径替代）
 
 历史新增功能：
 1. **WORKSPACE_VIEW 扩展**
@@ -148,7 +148,7 @@ python -m stardrifter_orchestration_mvp.global_coordinator_cli \
 
 ### Phase 5: Supervisor 集成 ✅
 
-**文件：** `src/stardrifter_orchestration_mvp/supervisor_loop.py`
+**文件：** `src/taskplane/supervisor_loop.py`
 
 关键修改：
 
@@ -190,12 +190,12 @@ python -m stardrifter_orchestration_mvp.global_coordinator_cli \
 
 ```bash
 # 基本用法
-python -m stardrifter_orchestration_mvp.global_coordinator_cli \
+python -m taskplane.global_coordinator_cli \
     --dsn postgresql://user:pass@localhost:5432/db \
     --repos repo-a repo-b repo-c
 
 # 配置基础配额和弹性池
-python -m stardrifter_orchestration_mvp.global_coordinator_cli \
+python -m taskplane.global_coordinator_cli \
     --dsn postgresql://user:pass@localhost:5432/db \
     --repos repo-a repo-b repo-c \
     --max-global-parallel 12 \
@@ -207,7 +207,7 @@ python -m stardrifter_orchestration_mvp.global_coordinator_cli \
 ### 启动 Supervisor（单 Repo 模式）
 
 ```bash
-python -m stardrifter_orchestration_mvp.supervisor_loop \
+python -m taskplane.supervisor_loop \
     --dsn postgresql://user:pass@localhost:5432/db \
     --repo repo-a \
     --project-dir /path/to/project \
@@ -292,15 +292,15 @@ expires_at = NOW() + INTERVAL '30 minutes'
 - `sql/003_ui_enhancements.sql` - UI 增强视图
 - `sql/apply_001.sql` - 单独应用 001 迁移的脚本
 - `sql/MIGRATION_GUIDE.md` - 迁移指南
-- `src/stardrifter_orchestration_mvp/global_coordinator.py`
-- `src/stardrifter_orchestration_mvp/agent_pool_manager.py`
-- `src/stardrifter_orchestration_mvp/global_coordinator_cli.py`
+- `src/taskplane/global_coordinator.py`
+- `src/taskplane/agent_pool_manager.py`
+- `src/taskplane/global_coordinator_cli.py`
 
 ### 修改文件
-- `src/stardrifter_orchestration_mvp/console_read_api.py`
-- `src/stardrifter_orchestration_mvp/static/console.html`
-- `src/stardrifter_orchestration_mvp/static/console.js`（legacy，当前 `/console` 主入口不再直接依赖）
-- `src/stardrifter_orchestration_mvp/supervisor_loop.py`
+- `src/taskplane/console_read_api.py`
+- `src/taskplane/static/console.html`
+- `src/taskplane/static/console.js`（legacy，当前 `/console` 主入口不再直接依赖）
+- `src/taskplane/supervisor_loop.py`
 
 ## 验证清单
 

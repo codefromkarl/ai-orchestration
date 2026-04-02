@@ -2,7 +2,7 @@ import json
 
 from pathlib import Path
 
-from stardrifter_orchestration_mvp.opencode_epic_decomposer import (
+from taskplane.opencode_epic_decomposer import (
     _build_prompt,
     _extract_result_payload,
     main,
@@ -13,7 +13,7 @@ def test_extract_result_payload_prefers_marker_payload_over_trailing_step_json()
     output = "\n".join(
         [
             '{"type":"step_start"}',
-            'STARDRIFTER_DECOMPOSITION_RESULT_JSON={"outcome":"blocked","summary":"awaiting repository context","reason_code":"awaiting_repository_context"}',
+            'TASKPLANE_DECOMPOSITION_RESULT_JSON={"outcome":"blocked","summary":"awaiting repository context","reason_code":"awaiting_repository_context"}',
             '{"type":"step_finish","reason":"stop"}',
         ]
     )
@@ -114,23 +114,23 @@ def test_main_blocks_when_contextweaver_index_fails(monkeypatch, capsys, tmp_pat
             return FakeCursor()
 
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.opencode_epic_decomposer.psycopg.connect",
+        "taskplane.opencode_epic_decomposer.psycopg.connect",
         lambda *args, **kwargs: FakeConnection(),
     )
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.opencode_epic_decomposer.ensure_contextweaver_index_for_checkout",
+        "taskplane.opencode_epic_decomposer.ensure_contextweaver_index_for_checkout",
         lambda project_dir, explicit_repo=None: "index failed",
     )
-    monkeypatch.setenv("STARDRIFTER_EPIC_ISSUE_NUMBER", "64")
-    monkeypatch.setenv("STARDRIFTER_EPIC_REPO", "codefromkarl/stardrifter")
-    monkeypatch.setenv("STARDRIFTER_ORCHESTRATION_DSN", "postgresql://example")
-    monkeypatch.setenv("STARDRIFTER_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("TASKPLANE_EPIC_ISSUE_NUMBER", "64")
+    monkeypatch.setenv("TASKPLANE_EPIC_REPO", "codefromkarl/stardrifter")
+    monkeypatch.setenv("TASKPLANE_DSN", "postgresql://example")
+    monkeypatch.setenv("TASKPLANE_PROJECT_DIR", str(tmp_path))
 
     result = main()
 
     assert result == 1
     output = capsys.readouterr().out.strip()
-    assert output.startswith("STARDRIFTER_DECOMPOSITION_RESULT_JSON=")
+    assert output.startswith("TASKPLANE_DECOMPOSITION_RESULT_JSON=")
     payload = json.loads(output.split("=", 1)[1])
     assert payload == {
         "outcome": "blocked",

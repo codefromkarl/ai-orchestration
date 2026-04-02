@@ -1,10 +1,10 @@
-from stardrifter_orchestration_mvp.models import OperatorRequest
-from stardrifter_orchestration_mvp.operator_request_cli import main
+from taskplane.models import OperatorRequest
+from taskplane.operator_request_cli import main
 
 
 def test_operator_request_cli_lists_open_requests_for_repo(monkeypatch, capsys):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}
@@ -66,7 +66,7 @@ def test_operator_request_cli_prints_empty_state_when_no_open_requests(
     monkeypatch, capsys
 ):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}
@@ -109,7 +109,7 @@ def test_operator_request_cli_prints_empty_state_when_no_open_requests(
 
 def test_operator_request_cli_can_include_closed_requests(monkeypatch, capsys):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}

@@ -10,7 +10,7 @@
 
 ```
 ============================================================
-Stardrifter Orchestration Web UI - End-to-End Tests
+Taskplane Web UI - End-to-End Tests
 ============================================================
 Base URL: http://localhost:8000
 
@@ -230,11 +230,11 @@ Results: 7/7 tests passed
 ## 文件清单
 
 ### 新增文件
-- `src/stardrifter_orchestration_mvp/web_ui_server.py` - Web UI 服务器入口
-- `src/stardrifter_orchestration_mvp/e2e_test.py` - 端到端测试套件
+- `src/taskplane/web_ui_server.py` - Web UI 服务器入口
+- `src/taskplane/e2e_test.py` - 端到端测试套件
 
 ### 修改文件
-- `src/stardrifter_orchestration_mvp/hierarchy_api.py` - 新增多项目 API 端点
+- `src/taskplane/hierarchy_api.py` - 新增多项目 API 端点
 
 ---
 
@@ -244,12 +244,12 @@ Results: 7/7 tests passed
 
 ```bash
 # 使用环境变量
-export STARDRIFTER_ORCHESTRATION_DSN="postgresql://stardrifter:stardrifter@localhost:5432/stardrifter_orchestration"
-python -m stardrifter_orchestration_mvp.web_ui_server --host 0.0.0.0 --port 8000
+export TASKPLANE_DSN="postgresql://stardrifter:stardrifter@localhost:5432/taskplane"
+python -m taskplane.web_ui_server --host 0.0.0.0 --port 8000
 
 # 或使用命令行参数
-python -m stardrifter_orchestration_mvp.web_ui_server \
-    --dsn postgresql://stardrifter:stardrifter@localhost:5432/stardrifter_orchestration \
+python -m taskplane.web_ui_server \
+    --dsn postgresql://stardrifter:stardrifter@localhost:5432/taskplane \
     --host 0.0.0.0 \
     --port 8000
 ```
@@ -258,7 +258,7 @@ python -m stardrifter_orchestration_mvp.web_ui_server \
 
 ```bash
 # 确保服务器正在运行
-python -m stardrifter_orchestration_mvp.e2e_test --base-url http://localhost:8000
+python -m taskplane.e2e_test --base-url http://localhost:8000
 ```
 
 ### 访问 UI

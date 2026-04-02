@@ -22,7 +22,7 @@ import {
   getSidebarTaskIdentity,
   getSidebarTaskMeta,
   getSidebarTreeViewState,
-} from '../src/stardrifter_orchestration_mvp/static/console_helpers.mjs';
+} from '../src/taskplane/static/console_helpers.mjs';
 
 function makeStorage(values = {}) {
   return {

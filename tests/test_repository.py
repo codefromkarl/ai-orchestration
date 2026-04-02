@@ -1,12 +1,13 @@
 import threading
 import time
 from typing import Any, cast
+from uuid import uuid4
 
 import pytest
-import stardrifter_orchestration_mvp.repository as repository_module
+import taskplane.repository as repository_module
 from datetime import datetime, timezone
 
-from stardrifter_orchestration_mvp.models import (
+from taskplane.models import (
     ApprovalEvent,
     EpicExecutionState,
     ExecutionRun,
@@ -22,11 +23,11 @@ from stardrifter_orchestration_mvp.models import (
     WorkDependency,
     WorkItem,
 )
-from stardrifter_orchestration_mvp.repository import (
+from taskplane.repository import (
     InMemoryControlPlaneRepository,
     PostgresControlPlaneRepository,
 )
-from stardrifter_orchestration_mvp.repository._postgres_row_mapping import (
+from taskplane.repository._postgres_row_mapping import (
     row_to_operator_request,
     row_to_program_story,
     row_to_work_claim,
@@ -79,6 +80,22 @@ def test_in_memory_repository_sync_ready_states_promotes_pending_items():
 
     assert repository.work_items_by_id["task-2"].status == "ready"
     assert repository.work_items_by_id["task-3"].status == "pending"
+
+
+def test_repository_module_exports_narrower_protocols_for_runtime_boundaries():
+    expected_exports = {
+        "WorkStateRepository",
+        "ClaimRepository",
+        "ExecutionRepository",
+        "WorkerRepository",
+        "StoryRepository",
+        "EpicRepository",
+        "StoryDecompositionRepository",
+        "EpicDecompositionRepository",
+    }
+
+    for name in expected_exports:
+        assert hasattr(repository_module, name), name
 
 
 def test_in_memory_repository_sync_ready_states_respects_story_dependencies():
@@ -2167,6 +2184,130 @@ def test_postgres_repository_updates_program_story_execution_status_with_propaga
     assert "UPDATE program_story" in executed_sql
     assert "sibling_storys AS" in executed_sql
     assert "dependency_state AS" in executed_sql
+
+
+@pytest.mark.usefixtures("postgres_test_db")
+def test_postgres_repository_propagation_skips_archived_sibling_stories(
+    postgres_test_db: str,
+):
+    assert psycopg is not None and dict_row is not None
+    repo = f"codefromkarl/stardrifter-propagation-{uuid4().hex[:8]}"
+
+    with psycopg.connect(
+        postgres_test_db, row_factory=cast(Any, dict_row)
+    ) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO program_epic (
+                    repo, issue_number, title, lane, program_status, execution_status
+                )
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    repo,
+                    18,
+                    "[Epic][06] propagation guard",
+                    "Lane 06",
+                    "approved",
+                    "active",
+                ),
+            )
+            cursor.execute(
+                """
+                INSERT INTO program_story (
+                    repo, issue_number, epic_issue_number, title, lane, complexity,
+                    program_status, execution_status
+                )
+                VALUES
+                    (%s, %s, %s, %s, %s, %s, %s, %s),
+                    (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    repo,
+                    40,
+                    18,
+                    "[Story][06-C] current story",
+                    "Lane 06",
+                    "medium",
+                    "approved",
+                    "active",
+                    repo,
+                    41,
+                    18,
+                    "[Story][06-D] archived verification closure",
+                    "Lane 06",
+                    "medium",
+                    "archived",
+                    "backlog",
+                ),
+            )
+            cursor.execute(
+                """
+                INSERT INTO program_story_dependency (
+                    repo, story_issue_number, depends_on_story_issue_number
+                )
+                VALUES (%s, %s, %s)
+                """,
+                (repo, 41, 40),
+            )
+            cursor.execute(
+                """
+                INSERT INTO work_item (
+                    id, repo, title, lane, wave, status, complexity,
+                    source_issue_number, canonical_story_issue_number,
+                    task_type, blocking_mode, dod_json
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                """,
+                (
+                    "issue-4000",
+                    repo,
+                    "story 40 task",
+                    "Lane 06",
+                    "Wave0",
+                    "done",
+                    "medium",
+                    4000,
+                    40,
+                    "implementation",
+                    "hard",
+                    "{}",
+                ),
+            )
+        connection.commit()
+
+        repository = PostgresControlPlaneRepository(connection)
+        repository.set_program_story_execution_status_with_propagation(
+            repo=repo,
+            issue_number=40,
+            execution_status="done",
+        )
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT issue_number, program_status::text, execution_status::text
+                FROM program_story
+                WHERE repo = %s
+                ORDER BY issue_number
+                """,
+                (repo,),
+            )
+            rows = cursor.fetchall()
+
+    assert rows == [
+        {
+            "issue_number": 40,
+            "program_status": "approved",
+            "execution_status": "done",
+        },
+        {
+            "issue_number": 41,
+            "program_status": "archived",
+            "execution_status": "backlog",
+        },
+    ]
 
 
 @pytest.mark.usefixtures("postgres_test_db")

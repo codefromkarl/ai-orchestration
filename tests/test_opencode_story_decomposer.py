@@ -4,13 +4,13 @@ import os
 import subprocess
 from typing import Any, cast
 
-from stardrifter_orchestration_mvp.opencode_story_decomposer import (
+from taskplane.opencode_story_decomposer import (
     _build_prompt,
     _create_task_issues_from_payload,
     _extract_result_payload,
     _render_task_issue_body,
 )
-from stardrifter_orchestration_mvp.contextweaver_indexing import (
+from taskplane.contextweaver_indexing import (
     RepositoryIdentity,
     ensure_contextweaver_index_for_checkout,
 )
@@ -166,7 +166,7 @@ def test_ensure_contextweaver_index_runs_index_command(monkeypatch, tmp_path):
     monkeypatch.setattr("subprocess.run", fake_run)
 
     monkeypatch.setenv(
-        "STARDRIFTER_CONTEXTWEAVER_REGISTRY_PATH",
+        "TASKPLANE_CONTEXTWEAVER_REGISTRY_PATH",
         str(tmp_path / "registry.json"),
     )
 
@@ -181,7 +181,7 @@ def test_ensure_contextweaver_index_returns_error_when_indexing_fails(
     monkeypatch, tmp_path
 ):
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing.resolve_repository_identity",
+        "taskplane.contextweaver_indexing.resolve_repository_identity",
         lambda project_dir, explicit_repo=None: RepositoryIdentity(
             project_dir=project_dir.resolve(),
             repo_root=project_dir.resolve(),
@@ -192,12 +192,12 @@ def test_ensure_contextweaver_index_returns_error_when_indexing_fails(
         ),
     )
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing._run_contextweaver_index",
+        "taskplane.contextweaver_indexing._run_contextweaver_index",
         lambda project_dir: "boom",
     )
 
     monkeypatch.setenv(
-        "STARDRIFTER_CONTEXTWEAVER_REGISTRY_PATH",
+        "TASKPLANE_CONTEXTWEAVER_REGISTRY_PATH",
         str(tmp_path / "registry.json"),
     )
 
@@ -207,11 +207,11 @@ def test_ensure_contextweaver_index_returns_error_when_indexing_fails(
 
 
 def test_load_timeout_seconds_from_env(monkeypatch):
-    from stardrifter_orchestration_mvp.opencode_story_decomposer import (
+    from taskplane.opencode_story_decomposer import (
         _load_timeout_seconds,
     )
 
-    monkeypatch.setenv("STARDRIFTER_OPENCODE_TIMEOUT_SECONDS", "45")
+    monkeypatch.setenv("TASKPLANE_OPENCODE_TIMEOUT_SECONDS", "45")
 
     assert _load_timeout_seconds() == 45
 
@@ -238,7 +238,7 @@ def test_extract_result_payload_prefers_marker_payload_over_trailing_step_json()
     output = "\n".join(
         [
             '{"type":"step_start"}',
-            'STARDRIFTER_DECOMPOSITION_RESULT_JSON={"outcome":"blocked","summary":"awaiting repository context","reason_code":"awaiting_repository_context"}',
+            'TASKPLANE_DECOMPOSITION_RESULT_JSON={"outcome":"blocked","summary":"awaiting repository context","reason_code":"awaiting_repository_context"}',
             '{"type":"step_finish","reason":"stop"}',
         ]
     )

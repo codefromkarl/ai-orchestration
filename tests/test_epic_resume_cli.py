@@ -1,19 +1,19 @@
 from datetime import datetime, timezone
 
-from stardrifter_orchestration_mvp.epic_resume_cli import main
-from stardrifter_orchestration_mvp.models import (
+from taskplane.epic_resume_cli import main
+from taskplane.models import (
     EpicExecutionState,
     OperatorRequest,
     ProgramStory,
 )
-from stardrifter_orchestration_mvp.repository import InMemoryControlPlaneRepository
+from taskplane.repository import InMemoryControlPlaneRepository
 
 
 def test_epic_resume_cli_clears_stale_operator_attention_when_no_open_requests_remain(
     monkeypatch, capsys
 ):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     progress_at = datetime(2026, 3, 1, 14, 0, tzinfo=timezone.utc)
@@ -101,7 +101,7 @@ def test_epic_resume_cli_preserves_operator_attention_when_open_requests_still_e
     monkeypatch, capsys
 ):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     progress_at = datetime(2026, 3, 1, 14, 0, tzinfo=timezone.utc)
@@ -189,7 +189,7 @@ def test_epic_resume_cli_dry_run_reports_refreshed_state_without_persisting(
     monkeypatch, capsys
 ):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     progress_at = datetime(2026, 3, 1, 14, 0, tzinfo=timezone.utc)
@@ -274,7 +274,7 @@ def test_epic_resume_cli_recomputes_active_state_when_runtime_is_cleaner_for_sup
     monkeypatch, capsys
 ):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     progress_at = datetime(2026, 3, 1, 14, 0, tzinfo=timezone.utc)
@@ -348,7 +348,7 @@ def test_epic_resume_cli_recomputes_status_from_current_story_runtime_instead_of
     monkeypatch, capsys
 ):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     progress_at = datetime(2026, 3, 1, 14, 0, tzinfo=timezone.utc)
@@ -426,7 +426,7 @@ def test_epic_resume_cli_recomputes_done_state_from_verified_epic_state(
     monkeypatch, capsys
 ):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     now = datetime(2026, 3, 1, 14, 0, tzinfo=timezone.utc)

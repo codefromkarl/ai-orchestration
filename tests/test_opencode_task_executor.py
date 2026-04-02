@@ -4,7 +4,7 @@ import json
 import subprocess
 import sys
 
-from stardrifter_orchestration_mvp.opencode_task_executor import (
+from taskplane.opencode_task_executor import (
     _build_timeout_payload,
     _build_resume_context_from_output,
     _build_salvaged_done_payload,
@@ -29,7 +29,7 @@ from stardrifter_orchestration_mvp.opencode_task_executor import (
     _load_hard_cap_seconds,
     _run_monitored_subprocess,
 )
-from stardrifter_orchestration_mvp.contextweaver_indexing import (
+from taskplane.contextweaver_indexing import (
     RepositoryIdentity,
     ensure_contextweaver_index_for_checkout,
 )
@@ -139,7 +139,7 @@ def test_extract_result_payload_reads_marker_payload():
     raw = "\n".join(
         [
             '{"type":"step_start","part":{"type":"step-start"}}',
-            'STARDRIFTER_EXECUTION_RESULT_JSON={"outcome":"done","summary":"ok","reason_code":"r1","decision_required":false}',
+            'TASKPLANE_EXECUTION_RESULT_JSON={"outcome":"done","summary":"ok","reason_code":"r1","decision_required":false}',
             '{"type":"step_finish","reason":"stop"}',
         ]
     )
@@ -239,7 +239,7 @@ def test_extract_result_payload_details_prefers_marker_terminal_payload():
     raw = "\n".join(
         [
             '{"outcome":"blocked","summary":"top-level","reason_code":"r1"}',
-            'STARDRIFTER_EXECUTION_RESULT_JSON={"outcome":"done","summary":"marker","reason_code":"r2","decision_required":false}',
+            'TASKPLANE_EXECUTION_RESULT_JSON={"outcome":"done","summary":"marker","reason_code":"r2","decision_required":false}',
         ]
     )
 
@@ -528,8 +528,8 @@ def test_build_prompt_accepts_list_shaped_dod_json_without_crashing():
 
 
 def test_build_opencode_run_command_without_model_override(monkeypatch, tmp_path):
-    monkeypatch.delenv("STARDRIFTER_OPENCODE_MODEL", raising=False)
-    monkeypatch.delenv("STARDRIFTER_OPENCODE_VARIANT", raising=False)
+    monkeypatch.delenv("TASKPLANE_OPENCODE_MODEL", raising=False)
+    monkeypatch.delenv("TASKPLANE_OPENCODE_VARIANT", raising=False)
 
     command = _build_opencode_run_command(
         focus_dir=tmp_path, prompt="return terminal payload"
@@ -549,8 +549,8 @@ def test_build_opencode_run_command_without_model_override(monkeypatch, tmp_path
 def test_build_opencode_run_command_with_model_and_variant_override(
     monkeypatch, tmp_path
 ):
-    monkeypatch.setenv("STARDRIFTER_OPENCODE_MODEL", "deepseek/deepseek-chat")
-    monkeypatch.setenv("STARDRIFTER_OPENCODE_VARIANT", "high")
+    monkeypatch.setenv("TASKPLANE_OPENCODE_MODEL", "deepseek/deepseek-chat")
+    monkeypatch.setenv("TASKPLANE_OPENCODE_VARIANT", "high")
 
     command = _build_opencode_run_command(
         focus_dir=tmp_path, prompt="return terminal payload"
@@ -572,26 +572,26 @@ def test_build_opencode_run_command_with_model_and_variant_override(
 
 
 def test_load_timeout_seconds_uses_shorter_default_in_bounded_mode(monkeypatch):
-    monkeypatch.delenv("STARDRIFTER_OPENCODE_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("TASKPLANE_OPENCODE_TIMEOUT_SECONDS", raising=False)
     assert _load_timeout_seconds(bounded_mode=True) == 300
 
 
 def test_load_hard_cap_seconds_defaults_to_three_times_timeout_in_bounded_mode(
     monkeypatch,
 ):
-    monkeypatch.delenv("STARDRIFTER_OPENCODE_HARD_CAP_SECONDS", raising=False)
+    monkeypatch.delenv("TASKPLANE_OPENCODE_HARD_CAP_SECONDS", raising=False)
 
     assert _load_hard_cap_seconds(timeout_seconds=300, bounded_mode=True) == 900
 
 
 def test_load_hard_cap_seconds_defaults_to_timeout_outside_bounded_mode(monkeypatch):
-    monkeypatch.delenv("STARDRIFTER_OPENCODE_HARD_CAP_SECONDS", raising=False)
+    monkeypatch.delenv("TASKPLANE_OPENCODE_HARD_CAP_SECONDS", raising=False)
 
     assert _load_hard_cap_seconds(timeout_seconds=1200, bounded_mode=False) == 1200
 
 
 def test_is_bounded_mode_enabled_reads_env(monkeypatch):
-    monkeypatch.setenv("STARDRIFTER_BOUNDED_EXECUTOR", "true")
+    monkeypatch.setenv("TASKPLANE_BOUNDED_EXECUTOR", "true")
     assert _is_bounded_mode_enabled() is True
 
 
@@ -647,7 +647,7 @@ def test_ensure_contextweaver_index_runs_index_command(monkeypatch, tmp_path):
     monkeypatch.setattr("subprocess.run", fake_run)
 
     monkeypatch.setenv(
-        "STARDRIFTER_CONTEXTWEAVER_REGISTRY_PATH",
+        "TASKPLANE_CONTEXTWEAVER_REGISTRY_PATH",
         str(tmp_path / "registry.json"),
     )
 
@@ -662,7 +662,7 @@ def test_ensure_contextweaver_index_returns_error_when_indexing_fails(
     monkeypatch, tmp_path
 ):
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing.resolve_repository_identity",
+        "taskplane.contextweaver_indexing.resolve_repository_identity",
         lambda project_dir, explicit_repo=None: RepositoryIdentity(
             project_dir=project_dir.resolve(),
             repo_root=project_dir.resolve(),
@@ -673,12 +673,12 @@ def test_ensure_contextweaver_index_returns_error_when_indexing_fails(
         ),
     )
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.contextweaver_indexing._run_contextweaver_index",
+        "taskplane.contextweaver_indexing._run_contextweaver_index",
         lambda project_dir: "boom",
     )
 
     monkeypatch.setenv(
-        "STARDRIFTER_CONTEXTWEAVER_REGISTRY_PATH",
+        "TASKPLANE_CONTEXTWEAVER_REGISTRY_PATH",
         str(tmp_path / "registry.json"),
     )
 
@@ -696,7 +696,7 @@ def test_ensure_contextweaver_index_can_be_skipped_by_env(monkeypatch, tmp_path)
         raise AssertionError("contextweaver index should have been skipped")
 
     monkeypatch.setattr("subprocess.run", fake_run)
-    monkeypatch.setenv("STARDRIFTER_SKIP_CONTEXTWEAVER_INDEX", "true")
+    monkeypatch.setenv("TASKPLANE_SKIP_CONTEXTWEAVER_INDEX", "true")
 
     result = ensure_contextweaver_index_for_checkout(tmp_path, explicit_repo="repo")
 

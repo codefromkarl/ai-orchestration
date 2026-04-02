@@ -1,4 +1,4 @@
-# Stardrifter Orchestration MVP
+# Taskplane
 
 ## 目标
 
@@ -95,8 +95,8 @@ NocoDB
 ## 本轮落地内容
 
 - `sql/control_plane_schema.sql`
-- `src/stardrifter_orchestration_mvp/planner.py`
-- `src/stardrifter_orchestration_mvp/guardrails.py`
+- `src/taskplane/planner.py`
+- `src/taskplane/guardrails.py`
 - `tests/test_planner.py`
 - `tests/test_guardrails.py`
 
@@ -132,7 +132,7 @@ MVP 初版的 worker flow 中，`queue.py` 负责算出 executable task，worker
 
 ### Repository 的职责
 
-当前 `src/stardrifter_orchestration_mvp/repository.py` 中有两个关键 claim API：
+当前 `src/taskplane/repository.py` 中有两个关键 claim API：
 
 - `claim_ready_work_item(...)`
 - `claim_next_executable_work_item(...)`
@@ -188,7 +188,7 @@ MVP 初版的 worker flow 中，`queue.py` 负责算出 executable task，worker
 
 ### Worker 的职责边界
 
-当前 `src/stardrifter_orchestration_mvp/worker.py` 的职责边界是：
+当前 `src/taskplane/worker.py` 的职责边界是：
 
 - 负责 ready 同步、queue evaluation、guardrail materialization
 - 负责为 executable candidates 预先生成 workspace metadata
@@ -203,7 +203,7 @@ MVP 初版的 worker flow 中，`queue.py` 负责算出 executable task，worker
 
 ### Workspace 边界
 
-`src/stardrifter_orchestration_mvp/workspace.py` 现在只负责工作空间元数据与 worktree 生命周期：
+`src/taskplane/workspace.py` 现在只负责工作空间元数据与 worktree 生命周期：
 
 - `build_workspace_spec(...)`：根据 issue number 和 title slug 派生 `branch_name / workspace_path`
 - `ensure_workspace(...)`：执行 `git worktree add`
@@ -416,7 +416,7 @@ MVP 初版的 worker flow 中，`queue.py` 负责算出 executable task，worker
 - opencode 非零退出不再一律折叠成同一种 blocked，而是开始区分 `interrupted_retryable` 与 `tooling_error`
 - worker 侧 failure policy 现在也与该 taxonomy 对齐：`interrupted_retryable` / `timeout` 走 retryable 路径，而 `tooling_error` / `protocol_error` 保持 blocked，不写 retry metadata
 - attempt-level report 已经具备更有运营价值的最小聚合能力，可以从 `ExecutionRun` 中统计 done / needs_decision / timeout / protocol_error，以及 invalid payload / non-terminal / interrupted / tooling error 等信号，并给出 first-attempt success、eventual success、average attempts to success 等基础成功率指标
-- worker 现在会显式组装 `ExecutionContext` 并传给 executor/verifier，shell adapter 也会将其序列化为 `STARDRIFTER_EXECUTION_CONTEXT_JSON`，从而减少执行器在运行时临时重建上下文的隐式耦合
+- worker 现在会显式组装 `ExecutionContext` 并传给 executor/verifier，shell adapter 也会将其序列化为 `TASKPLANE_EXECUTION_CONTEXT_JSON`，从而减少执行器在运行时临时重建上下文的隐式耦合
 - 最小 session policy 已落地：`timeout` 仍按 fresh-session retry 处理，而 `interrupted_retryable` 会把下一次执行上下文标记成 `resume_candidate`
 
 这还不是完整的 reliability framework，但已经把执行稳定性从“靠日志排查”推进成“运行时链路中显式建模”。

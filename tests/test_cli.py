@@ -1,6 +1,6 @@
-from stardrifter_orchestration_mvp.cli import main
-from stardrifter_orchestration_mvp.models import ExecutionGuardrailContext
-from stardrifter_orchestration_mvp.worker import WorkerCycleResult
+from taskplane.cli import main
+from taskplane.models import ExecutionGuardrailContext
+from taskplane.worker import WorkerCycleResult
 
 
 def _assert_system_exit(callable_obj) -> None:
@@ -17,7 +17,7 @@ def test_cli_main_loads_env_builds_repository_and_runs_worker_cycle(
     captured: dict[str, object] = {}
 
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
 
@@ -35,6 +35,7 @@ def test_cli_main_loads_env_builds_repository_and_runs_worker_cycle(
         committer,
         work_item_ids=None,
         workspace_manager=None,
+        dsn=None,
     ):
         captured["repository"] = repository
         captured["context"] = context
@@ -67,7 +68,7 @@ def test_cli_main_loads_env_builds_repository_and_runs_worker_cycle(
 
 def test_cli_main_handles_empty_cycle_without_error(monkeypatch, capsys):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
 
@@ -83,7 +84,7 @@ def test_cli_main_handles_empty_cycle_without_error(monkeypatch, capsys):
 
 def test_cli_main_passes_work_item_ids_when_provided(monkeypatch):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}
@@ -98,6 +99,7 @@ def test_cli_main_passes_work_item_ids_when_provided(monkeypatch):
         committer,
         work_item_ids=None,
         workspace_manager=None,
+        dsn=None,
     ):
         captured["work_item_ids"] = work_item_ids
         return WorkerCycleResult(claimed_work_id=None)
@@ -121,7 +123,7 @@ def test_cli_main_builds_workspace_manager_when_worktree_root_is_provided(
     monkeypatch, tmp_path
 ):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}
@@ -136,6 +138,7 @@ def test_cli_main_builds_workspace_manager_when_worktree_root_is_provided(
         committer,
         work_item_ids=None,
         workspace_manager=None,
+        dsn=None,
     ):
         captured["workspace_manager"] = workspace_manager
         return WorkerCycleResult(claimed_work_id=None)
@@ -157,7 +160,7 @@ def test_cli_main_builds_workspace_manager_when_worktree_root_is_provided(
 
 def test_cli_main_rejects_missing_executor_command_binary(monkeypatch, tmp_path):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
 
@@ -177,7 +180,7 @@ def test_cli_main_rejects_missing_executor_command_binary(monkeypatch, tmp_path)
 
 def test_cli_main_rejects_missing_verifier_command_binary(monkeypatch, tmp_path):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
 
@@ -199,7 +202,7 @@ def test_cli_main_accepts_virtual_llm_commands_without_binary_lookup(
     monkeypatch, tmp_path
 ):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
 
@@ -221,7 +224,7 @@ def test_cli_main_accepts_virtual_llm_commands_without_binary_lookup(
 
 def test_cli_main_rejects_nonexistent_workdir(monkeypatch, tmp_path):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
 
@@ -236,7 +239,7 @@ def test_cli_main_rejects_nonexistent_workdir(monkeypatch, tmp_path):
 
 def test_cli_main_rejects_worktree_root_under_file_path(monkeypatch, tmp_path):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     blocking_file = tmp_path / "not-a-dir"

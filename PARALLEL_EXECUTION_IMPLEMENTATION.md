@@ -26,7 +26,7 @@
 
 ### 2. 数据模型扩展 ✅
 
-**文件**: `src/stardrifter_orchestration_mvp/models.py`
+**文件**: `src/taskplane/models.py`
 
 新增模型：
 - `AIConversationTurn` - AI 对话轮次
@@ -38,7 +38,7 @@
 
 ### 3. 上下文持久化层 ✅
 
-**文件**: `src/stardrifter_orchestration_mvp/context_store.py`
+**文件**: `src/taskplane/context_store.py`
 
 核心功能：
 - `ContextStore.save_turn()` - 保存对话历史
@@ -49,7 +49,7 @@
 
 ### 4. 通知 Webhook 模块 ✅
 
-**文件**: `src/stardrifter_orchestration_mvp/notification_webhook.py`
+**文件**: `src/taskplane/notification_webhook.py`
 
 支持的渠道：
 - Discord Webhook
@@ -65,7 +65,7 @@
 
 ### 5. AI 自主决策层 ✅
 
-**文件**: `src/stardrifter_orchestration_mvp/ai_decision_agent.py`
+**文件**: `src/taskplane/ai_decision_agent.py`
 
 核心功能：
 - `AIDecisionAgent.evaluate_needs_decision()` - 评估 needs_decision 情况
@@ -81,7 +81,7 @@
 
 ### 6. Agent Hub 多 Agent 管理 ✅
 
-**文件**: `src/stardrifter_orchestration_mvp/agent_hub.py`
+**文件**: `src/taskplane/agent_hub.py`
 
 支持的 Agent 类型：
 - `claude_code`
@@ -98,7 +98,7 @@
 
 ### 7. 智能失败恢复策略 ✅
 
-**文件**: `src/stardrifter_orchestration_mvp/worker.py`
+**文件**: `src/taskplane/worker.py`
 
 改进内容：
 - 扩展 `REQUEUEABLE_EXECUTION_FAILURE_REASONS` - 可自动重试的失败类型
@@ -115,7 +115,7 @@ backoff = min(5 * 2^(attempt-1), 240) 分钟
 
 ### 8. Supervisor 并行调度 ✅
 
-**文件**: `src/stardrifter_orchestration_mvp/supervisor_loop.py`
+**文件**: `src/taskplane/supervisor_loop.py`
 
 改进内容：
 - `_select_task_candidates()` - 支持 Story 级并行
@@ -141,8 +141,8 @@ TELEGRAM_BOT_TOKEN=...
 TELEGRAM_CHAT_ID=...
 
 # 执行器配置
-STARDRIFTER_BOUNDED_EXECUTOR=1  # 启用 bounded mode
-STARDRIFTER_OPENCODE_TIMEOUT_SECONDS=1800  # Opencode 超时
+TASKPLANE_BOUNDED_EXECUTOR=1  # 启用 bounded mode
+TASKPLANE_OPENCODE_TIMEOUT_SECONDS=1800  # Opencode 超时
 ```
 
 ### 数据库初始化
@@ -156,7 +156,7 @@ psql $DATABASE_URL -f sql/001_parallel_execution_extensions.sql
 ### 1. 使用上下文持久化
 
 ```python
-from stardrifter_orchestration_mvp.context_store import ContextStore
+from taskplane.context_store import ContextStore
 
 context = ContextStore(dsn=dsn)
 
@@ -178,7 +178,7 @@ history, summary = context.get_full_context("task-123")
 ### 2. 发送通知
 
 ```python
-from stardrifter_orchestration_mvp.notification_webhook import NotificationWebhook
+from taskplane.notification_webhook import NotificationWebhook
 
 webhook = NotificationWebhook(dsn=dsn)
 
@@ -200,7 +200,7 @@ webhook.notify_story_complete(
 ### 3. 使用 AI 决策
 
 ```python
-from stardrifter_orchestration_mvp.ai_decision_agent import AIDecisionAgent
+from taskplane.ai_decision_agent import AIDecisionAgent
 
 agent = AIDecisionAgent(dsn=dsn)
 
@@ -221,7 +221,7 @@ elif result.outcome == "requires_human":
 ### 4. 使用 Agent Hub
 
 ```python
-from stardrifter_orchestration_mvp.agent_hub import AgentHub, AgentConfig
+from taskplane.agent_hub import AgentHub, AgentConfig
 
 hub = AgentHub(workdir="/path/to/repo")
 
@@ -229,14 +229,14 @@ hub = AgentHub(workdir="/path/to/repo")
 hub.register_agent(AgentConfig(
     agent_name="claude-code",
     agent_type="claude_code",
-    command_template="claude --work-id ${STARDRIFTER_WORK_ID}",
+    command_template="claude --work-id ${TASKPLANE_WORK_ID}",
     timeout_seconds=1800,
 ))
 
 hub.register_agent(AgentConfig(
     agent_name="opencode",
     agent_type="opencode",
-    command_template="python3 -m stardrifter_orchestration_mvp.opencode_task_executor",
+    command_template="python3 -m taskplane.opencode_task_executor",
     timeout_seconds=1800,
 ))
 

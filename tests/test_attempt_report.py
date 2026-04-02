@@ -1,4 +1,4 @@
-from stardrifter_orchestration_mvp.attempt_report import build_attempt_report
+from taskplane.attempt_report import build_attempt_report
 
 
 def test_build_attempt_report_counts_execution_outcomes():

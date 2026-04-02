@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from stardrifter_orchestration_mvp.models import WorkClaim, WorkItem, WorkStatus
+from taskplane.models import WorkClaim, WorkItem, WorkStatus
 
 
 def _sample_work_item(*, status: WorkStatus = "blocked") -> WorkItem:
@@ -27,7 +27,7 @@ def _sample_work_item(*, status: WorkStatus = "blocked") -> WorkItem:
 
 
 def test_run_epic_split_action_uses_repo_specific_workdir(tmp_path):
-    from stardrifter_orchestration_mvp.console_actions import (
+    from taskplane.console_actions import (
         ConsoleActionSettings,
         run_epic_split_action,
     )
@@ -95,7 +95,7 @@ def test_run_epic_split_action_uses_repo_specific_workdir(tmp_path):
 
 
 def test_run_story_split_action_uses_repo_specific_workdir(tmp_path):
-    from stardrifter_orchestration_mvp.console_actions import (
+    from taskplane.console_actions import (
         ConsoleActionSettings,
         run_story_split_action,
     )
@@ -162,7 +162,7 @@ def test_run_story_split_action_uses_repo_specific_workdir(tmp_path):
 
 
 def test_retry_task_action_requeues_blocked_task_and_syncs_ready_states():
-    from stardrifter_orchestration_mvp.console_actions import run_task_retry_action
+    from taskplane.console_actions import run_task_retry_action
 
     calls: list[tuple[Any, ...]] = []
     work_item = _sample_work_item(status="blocked")
@@ -223,7 +223,7 @@ def test_retry_task_action_requeues_blocked_task_and_syncs_ready_states():
 
 
 def test_retry_task_action_rejects_active_in_progress_task():
-    from stardrifter_orchestration_mvp.console_actions import (
+    from taskplane.console_actions import (
         ConsoleActionConflictError,
         run_task_retry_action,
     )
@@ -244,7 +244,7 @@ def test_retry_task_action_rejects_active_in_progress_task():
 
 
 def test_run_epic_split_action_rejects_epic_already_decomposing(tmp_path):
-    from stardrifter_orchestration_mvp.console_actions import (
+    from taskplane.console_actions import (
         ConsoleActionConflictError,
         ConsoleActionSettings,
         run_epic_split_action,
@@ -281,7 +281,7 @@ def test_run_epic_split_action_rejects_epic_already_decomposing(tmp_path):
 
 
 def test_run_story_split_action_rejects_story_already_active_with_tasks(tmp_path):
-    from stardrifter_orchestration_mvp.console_actions import (
+    from taskplane.console_actions import (
         ConsoleActionConflictError,
         ConsoleActionSettings,
         run_story_split_action,
@@ -313,7 +313,7 @@ def test_run_story_split_action_rejects_story_already_active_with_tasks(tmp_path
 
 
 def test_run_epic_split_action_rejects_existing_running_epic_job(tmp_path):
-    from stardrifter_orchestration_mvp.console_actions import (
+    from taskplane.console_actions import (
         ConsoleActionConflictError,
         ConsoleActionSettings,
         run_epic_split_action,
@@ -356,7 +356,7 @@ def test_run_epic_split_action_rejects_existing_running_epic_job(tmp_path):
 
 
 def test_run_story_split_action_rejects_existing_running_story_job(tmp_path):
-    from stardrifter_orchestration_mvp.console_actions import (
+    from taskplane.console_actions import (
         ConsoleActionConflictError,
         ConsoleActionSettings,
         run_story_split_action,
@@ -400,7 +400,7 @@ def test_run_story_split_action_rejects_existing_running_story_job(tmp_path):
 
 
 def test_retry_task_action_preserves_failure_context_fields():
-    from stardrifter_orchestration_mvp.console_actions import run_task_retry_action
+    from taskplane.console_actions import run_task_retry_action
 
     work_item = _sample_work_item(status="blocked")
 

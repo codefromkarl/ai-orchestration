@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_DIR="${STARDRIFTER_PROJECT_DIR:-/home/yuanzhi/Develop/playground/stardrifter}"
-WORK_ID="${STARDRIFTER_WORK_ID:-unknown}"
-WORK_TITLE="${STARDRIFTER_WORK_TITLE:-}"
-EXECUTION_CONTEXT_JSON="${STARDRIFTER_EXECUTION_CONTEXT_JSON:-}"
-EXECUTOR_TIMEOUT_SECONDS="${STARDRIFTER_EXECUTOR_TIMEOUT_SECONDS:-600}"
-LOG_DIR="${STARDRIFTER_EXECUTOR_LOG_DIR:-/tmp/stardrifter-codex-exec}"
+PROJECT_DIR="${TASKPLANE_PROJECT_DIR:-/home/yuanzhi/Develop/playground/stardrifter}"
+WORK_ID="${TASKPLANE_WORK_ID:-unknown}"
+WORK_TITLE="${TASKPLANE_WORK_TITLE:-}"
+EXECUTION_CONTEXT_JSON="${TASKPLANE_EXECUTION_CONTEXT_JSON:-}"
+EXECUTOR_TIMEOUT_SECONDS="${TASKPLANE_EXECUTOR_TIMEOUT_SECONDS:-600}"
+LOG_DIR="${TASKPLANE_EXECUTOR_LOG_DIR:-/tmp/taskplane-codex-exec}"
 mkdir -p "${LOG_DIR}"
 LOG_FILE="${LOG_DIR}/${WORK_ID}.log"
 
@@ -98,7 +98,7 @@ else:
         "preexisting_dirty_paths": sorted(before_set),
     }
 
-print(f"STARDRIFTER_EXECUTION_RESULT_JSON={json.dumps(payload, ensure_ascii=False)}")
+print(f"TASKPLANE_EXECUTION_RESULT_JSON={json.dumps(payload, ensure_ascii=False)}")
 PY
 
 if [[ ${CODEX_EXIT} -ne 0 ]]; then

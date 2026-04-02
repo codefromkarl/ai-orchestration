@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from stardrifter_orchestration_mvp.models import WorkClaim, WorkItem
-from stardrifter_orchestration_mvp.workspace import (
+from taskplane.models import WorkClaim, WorkItem
+from taskplane.workspace import (
     WorkspaceManager,
     build_workspace_spec,
     ensure_workspace,
@@ -209,6 +209,139 @@ def test_workspace_manager_prepare_does_not_write_claim(tmp_path):
             "-b",
             "task/53-04-doc",
             str(tmp_path / "task-53-04-doc"),
+            "main",
+        ]
+    ]
+
+
+def test_ensure_workspace_returns_existing_workspace_without_running_git(tmp_path):
+    worktree_root = tmp_path / "worktrees"
+    existing_workspace = worktree_root / "story-42"
+    existing_workspace.mkdir(parents=True)
+    work_item = WorkItem(
+        id="issue-71",
+        title="[01-DOC] 回填 domain README",
+        lane="Lane 01",
+        wave="wave-1",
+        status="pending",
+        source_issue_number=71,
+        canonical_story_issue_number=42,
+    )
+    commands: list[list[str]] = []
+
+    def fake_runner(command: list[str]) -> None:
+        commands.append(command)
+
+    spec = ensure_workspace(
+        work_item=work_item,
+        repo_root=Path("/repo/root"),
+        worktree_root=worktree_root,
+        base_branch="main",
+        runner=fake_runner,
+        branch_exists=lambda repo_root, branch_name: (_ for _ in ()).throw(
+            AssertionError("branch lookup should be skipped for existing workspace")
+        ),
+    )
+
+    assert spec.workspace_path == existing_workspace
+    assert commands == []
+
+
+def test_workspace_manager_prewarm_only_creates_story_workspace_once(tmp_path):
+    commands: list[list[str]] = []
+    manager = WorkspaceManager(
+        repo_root=Path("/repo/root"),
+        worktree_root=tmp_path,
+        base_branch="main",
+        runner=commands.append,
+    )
+    story_task_a = WorkItem(
+        id="issue-80",
+        title="[01-IMPL] Story task A",
+        lane="Lane 01",
+        wave="wave-1",
+        status="ready",
+        source_issue_number=80,
+        canonical_story_issue_number=42,
+    )
+    story_task_b = WorkItem(
+        id="issue-81",
+        title="[01-IMPL] Story task B",
+        lane="Lane 01",
+        wave="wave-1",
+        status="ready",
+        source_issue_number=81,
+        canonical_story_issue_number=42,
+    )
+    standalone_task = WorkItem(
+        id="issue-82",
+        title="[01-IMPL] Standalone task",
+        lane="Lane 01",
+        wave="wave-1",
+        status="ready",
+        source_issue_number=82,
+    )
+
+    warmed = manager.prewarm(work_items=[story_task_a, story_task_b, standalone_task])
+
+    assert warmed == [tmp_path / "story-42"]
+    assert commands == [
+        [
+            "git",
+            "-C",
+            "/repo/root",
+            "worktree",
+            "add",
+            "-b",
+            "story/42",
+            str(tmp_path / "story-42"),
+            "main",
+        ]
+    ]
+
+
+def test_workspace_manager_prepare_reuses_prewarmed_story_workspace(tmp_path):
+    commands: list[list[str]] = []
+
+    class FakeRepository:
+        def delete_work_claim(self, work_id: str) -> None:
+            del work_id
+
+    manager = WorkspaceManager(
+        repo_root=Path("/repo/root"),
+        worktree_root=tmp_path,
+        base_branch="main",
+        runner=commands.append,
+    )
+    work_item = WorkItem(
+        id="issue-83",
+        title="[01-IMPL] Story task",
+        lane="Lane 01",
+        wave="wave-1",
+        status="ready",
+        source_issue_number=83,
+        canonical_story_issue_number=42,
+    )
+
+    warmed = manager.prewarm(work_items=[work_item])
+    workspace_path = manager.prepare(
+        work_item=work_item,
+        worker_name="worker-a",
+        repository=FakeRepository(),
+    )
+
+    assert warmed == [tmp_path / "story-42"]
+    assert workspace_path == tmp_path / "story-42"
+    assert commands == [
+        [
+            "git",
+            "-C",
+            "/repo/root",
+            "worktree",
+            "add",
+            "-b",
+            "story/42",
+            str(tmp_path / "story-42"),
             "main",
         ]
     ]

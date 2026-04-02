@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "stardrifter-orchestration-mvp"
+name = "taskplane"
 version = "0.1.0"
 description = "PostgreSQL-backed orchestration control plane MVP for Starsector migration work."
 requires-python = ">=3.11"
@@ -14,23 +14,23 @@ dependencies = [
 ]
 
 [project.scripts]
-stardrifter-orchestration-worker = "stardrifter_orchestration_mvp.cli:entrypoint"
-stardrifter-orchestration-operator = "stardrifter_orchestration_mvp.operator_cli:entrypoint"
-stardrifter-orchestration-import = "stardrifter_orchestration_mvp.import_cli:entrypoint"
-stardrifter-orchestration-project = "stardrifter_orchestration_mvp.projection_sync_cli:entrypoint"
-stardrifter-orchestration-governance = "stardrifter_orchestration_mvp.governance_sync_cli:entrypoint"
-stardrifter-orchestration-governance-state = "stardrifter_orchestration_mvp.governance_state_cli:entrypoint"
-stardrifter-orchestration-governance-report = "stardrifter_orchestration_mvp.governance_report_cli:entrypoint"
-stardrifter-orchestration-governance-priority = "stardrifter_orchestration_mvp.governance_priority_cli:entrypoint"
-stardrifter-orchestration-decompose = "stardrifter_orchestration_mvp.story_decomposition_cli:entrypoint"
-stardrifter-orchestration-story = "stardrifter_orchestration_mvp.story_runner_cli:entrypoint"
-stardrifter-orchestration-supervisor = "stardrifter_orchestration_mvp.supervisor_loop:main"
-stardrifter-orchestration-triage = "stardrifter_orchestration_mvp.triage_report_cli:entrypoint"
-stardrifter-orchestration-attempt-report = "stardrifter_orchestration_mvp.attempt_report_cli:entrypoint"
-stardrifter-orchestration-reconciliation-report = "stardrifter_orchestration_mvp.reconciliation_report_cli:entrypoint"
-stardrifter-orchestration-loop = "stardrifter_orchestration_mvp.orchestration_loop:entrypoint"
-stardrifter-orchestration-hierarchy = "stardrifter_orchestration_mvp.hierarchy_report_cli:entrypoint"
-stardrifter-orchestration-ui = "stardrifter_orchestration_mvp.hierarchy_api_cli:entrypoint"
+taskplane-worker = "taskplane.cli:entrypoint"
+taskplane-operator = "taskplane.operator_cli:entrypoint"
+taskplane-import = "taskplane.import_cli:entrypoint"
+taskplane-project = "taskplane.projection_sync_cli:entrypoint"
+taskplane-governance = "taskplane.governance_sync_cli:entrypoint"
+taskplane-governance-state = "taskplane.governance_state_cli:entrypoint"
+taskplane-governance-report = "taskplane.governance_report_cli:entrypoint"
+taskplane-governance-priority = "taskplane.governance_priority_cli:entrypoint"
+taskplane-decompose = "taskplane.story_decomposition_cli:entrypoint"
+taskplane-story = "taskplane.story_runner_cli:entrypoint"
+taskplane-supervisor = "taskplane.supervisor_loop:main"
+taskplane-triage = "taskplane.triage_report_cli:entrypoint"
+taskplane-attempt-report = "taskplane.attempt_report_cli:entrypoint"
+taskplane-reconciliation-report = "taskplane.reconciliation_report_cli:entrypoint"
+taskplane-loop = "taskplane.orchestration_loop:entrypoint"
+taskplane-hierarchy = "taskplane.hierarchy_report_cli:entrypoint"
+taskplane-ui = "taskplane.hierarchy_api_cli:entrypoint"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

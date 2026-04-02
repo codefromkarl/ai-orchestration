@@ -1,9 +1,9 @@
-from stardrifter_orchestration_mvp.attempt_report_cli import main
+from taskplane.attempt_report_cli import main
 
 
 def test_attempt_report_cli_prints_summary(monkeypatch, capsys):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
 

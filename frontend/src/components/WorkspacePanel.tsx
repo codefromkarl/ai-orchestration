@@ -7,6 +7,7 @@ import {
   NotificationItem,
   RepoSummary,
   RunningJobSummary,
+  RuntimeObservationItem,
   SnapshotHealthStatus,
   WorkItem,
   WorkspaceViewId,
@@ -17,6 +18,7 @@ import { getPriorityLabel } from '../utils/status-utils';
 interface WorkspacePanelProps {
   activeView: WorkspaceViewId;
   jobs: RunningJobSummary[];
+  runtimeObservations: RuntimeObservationItem[];
   tasks: WorkItem[];
   notifications: NotificationItem[];
   failedNotifications: NotificationItem[];
@@ -86,6 +88,18 @@ function formatAge(seconds?: number | null) {
   return `${Math.round(seconds / 86400)}d`;
 }
 
+function formatTimestamp(value?: string | null) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 function EmptyState({ message }: { message: string }) {
   return (
     <div
@@ -99,6 +113,7 @@ function EmptyState({ message }: { message: string }) {
 export function WorkspacePanel({
   activeView,
   jobs,
+  runtimeObservations,
   tasks,
   notifications,
   failedNotifications,
@@ -156,6 +171,84 @@ export function WorkspacePanel({
             </button>
           ))}
           {jobs.length === 0 && <EmptyState message="当前没有运行中的作业。" />}
+        </div>
+      </div>
+
+      <div id="runtime-observability-panel" hidden={activeView !== 'runtime_observability'}>
+        <h2 className="mb-4 text-lg font-semibold text-text">
+          运行态观测
+        </h2>
+        <div className="mb-4 rounded-xl border border-border bg-surface px-4 py-3 text-sm text-text-secondary">
+          按任务聚合展示最近 session、checkpoint 与 artifact 摘要，点击卡片可直接打开任务详情。
+        </div>
+        <div className="space-y-3">
+          {runtimeObservations.map((item) => (
+            <button
+              key={item.workId}
+              type="button"
+              data-runtime-work-id={item.workId}
+              onClick={() => onTaskClick(item.workId)}
+              className="block w-full rounded-xl border border-border bg-surface px-4 py-3 text-left text-text transition-colors hover:bg-surface-hover"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold text-text">
+                    {item.issueNumber ? `#${item.issueNumber} ` : ''}{item.title}
+                  </div>
+                  <div className="mt-1 text-xs text-text-secondary">
+                    {[item.workId, item.workerName, item.sessionCurrentPhase || item.sessionStatus, item.lane].filter(Boolean).join(' · ')}
+                  </div>
+                </div>
+                {item.status && <Badge status={item.status} />}
+              </div>
+
+              {(item.checkpointSummary || item.blockedReason || item.lastFailureReason) && (
+                <div className="mt-3 text-sm text-text">
+                  {item.checkpointSummary || item.blockedReason || item.lastFailureReason}
+                </div>
+              )}
+
+              <div className="mt-3 flex flex-wrap gap-2 text-xs text-text-secondary">
+                {item.sessionId && (
+                  <span className="rounded-full border border-border bg-surface-hover px-2 py-1">
+                    session {item.sessionId}
+                  </span>
+                )}
+                {item.sessionAttemptIndex !== undefined && item.sessionAttemptIndex !== null && (
+                  <span className="rounded-full border border-border bg-surface-hover px-2 py-1">
+                    attempt {item.sessionAttemptIndex}
+                  </span>
+                )}
+                {item.artifactType && (
+                  <span className="rounded-full border border-border bg-surface-hover px-2 py-1">
+                    artifact {item.artifactType}
+                  </span>
+                )}
+                {item.sessionUpdatedAt && (
+                  <span className="rounded-full border border-border bg-surface-hover px-2 py-1">
+                    updated {formatTimestamp(item.sessionUpdatedAt)}
+                  </span>
+                )}
+              </div>
+
+              {(item.artifactSummary || item.artifactKey || item.checkpointNextAction || item.sessionWaitingReason) && (
+                <div className="mt-3 space-y-1 text-xs text-text-secondary">
+                  {item.artifactSummary && <div>{item.artifactSummary}</div>}
+                  <div>
+                    {[
+                      item.artifactKey,
+                      item.checkpointNextAction,
+                      item.sessionWaitingReason,
+                      item.artifactCreatedAt ? `artifact ${formatTimestamp(item.artifactCreatedAt)}` : '',
+                    ].filter(Boolean).join(' · ')}
+                  </div>
+                </div>
+              )}
+            </button>
+          ))}
+          {runtimeObservations.length === 0 && (
+            <EmptyState message="当前仓库还没有可展示的运行态 session 或 artifact。" />
+          )}
         </div>
       </div>
 

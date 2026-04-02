@@ -1,10 +1,10 @@
-from stardrifter_orchestration_mvp.governance_sync_cli import main
-from stardrifter_orchestration_mvp.models import ProgramEpic, ProgramGovernanceProjection, ProgramStory
+from taskplane.governance_sync_cli import main
+from taskplane.models import ProgramEpic, ProgramGovernanceProjection, ProgramStory
 
 
 def test_governance_sync_cli_loads_issues_and_persists_projection(monkeypatch, capsys):
     monkeypatch.setenv(
-        "STARDRIFTER_ORCHESTRATION_DSN",
+        "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
     )
     captured: dict[str, object] = {}

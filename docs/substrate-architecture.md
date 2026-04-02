@@ -41,7 +41,7 @@ These modules already behave like reusable orchestration infrastructure.
 
 ### Control-plane data model
 
-- `src/stardrifter_orchestration_mvp/models.py`
+- `src/taskplane/models.py`
 
 Core reusable entities include:
 
@@ -56,8 +56,8 @@ These model the orchestration lifecycle independently of Stardrifter-specific ga
 
 ### Repository-backed control plane
 
-- `src/stardrifter_orchestration_mvp/repository.py`
-- `src/stardrifter_orchestration_mvp/factory.py`
+- `src/taskplane/repository.py`
+- `src/taskplane/factory.py`
 
 This is the strongest reusable seam in the project.
 
@@ -75,9 +75,9 @@ The repository is the actual control-plane authority.
 
 ### Scheduling and safety core
 
-- `src/stardrifter_orchestration_mvp/planner.py`
-- `src/stardrifter_orchestration_mvp/guardrails.py`
-- `src/stardrifter_orchestration_mvp/queue.py`
+- `src/taskplane/planner.py`
+- `src/taskplane/guardrails.py`
+- `src/taskplane/queue.py`
 
 These modules implement generic orchestration logic:
 
@@ -90,7 +90,7 @@ They are not inherently coupled to GitHub, Stardrifter, or one specific issue ta
 
 ### Worker shell
 
-- `src/stardrifter_orchestration_mvp/worker.py`
+- `src/taskplane/worker.py`
 
 The worker is best understood as an orchestration shell around the repository.
 
@@ -105,17 +105,17 @@ Its substrate responsibilities are:
 
 ### Runtime adapters
 
-- `src/stardrifter_orchestration_mvp/adapters.py`
-- `src/stardrifter_orchestration_mvp/opencode_task_executor.py`
-- `src/stardrifter_orchestration_mvp/workspace.py`
-- `src/stardrifter_orchestration_mvp/git_committer.py`
-- `src/stardrifter_orchestration_mvp/github_writeback.py`
+- `src/taskplane/adapters.py`
+- `src/taskplane/opencode_task_executor.py`
+- `src/taskplane/workspace.py`
+- `src/taskplane/git_committer.py`
+- `src/taskplane/github_writeback.py`
 
 These are already adapter-shaped, even if they are still packaged under the same namespace.
 
 The project now also has explicit adapter-facing Protocols in:
 
-- `src/stardrifter_orchestration_mvp/protocols.py`
+- `src/taskplane/protocols.py`
 
 Current formalized interfaces include:
 
@@ -143,10 +143,10 @@ These modules are valuable, but they are not substrate core. They encode one con
 
 ### GitHub issue intake and projection
 
-- `src/stardrifter_orchestration_mvp/github_sync.py`
-- `src/stardrifter_orchestration_mvp/github_importer.py`
-- `src/stardrifter_orchestration_mvp/issue_projection.py`
-- `src/stardrifter_orchestration_mvp/projection_sync.py`
+- `src/taskplane/github_sync.py`
+- `src/taskplane/github_importer.py`
+- `src/taskplane/issue_projection.py`
+- `src/taskplane/projection_sync.py`
 
 These assume:
 
@@ -159,9 +159,9 @@ That is a **source adapter**, not the substrate.
 
 ### Governance and hierarchy policy
 
-- `src/stardrifter_orchestration_mvp/governance_sync.py`
-- `src/stardrifter_orchestration_mvp/governance_priority_cli.py`
-- `src/stardrifter_orchestration_mvp/governance_report_cli.py`
+- `src/taskplane/governance_sync.py`
+- `src/taskplane/governance_priority_cli.py`
+- `src/taskplane/governance_report_cli.py`
 - `docs/program-governance-model.md`
 
 These encode one hierarchical policy layer:
@@ -175,10 +175,10 @@ This is a **domain governance adapter**, not a universal orchestration requireme
 
 ### Story decomposition and story runner semantics
 
-- `src/stardrifter_orchestration_mvp/story_runner.py`
-- `src/stardrifter_orchestration_mvp/story_runner_cli.py`
-- `src/stardrifter_orchestration_mvp/story_decomposition.py`
-- `src/stardrifter_orchestration_mvp/opencode_story_decomposer.py`
+- `src/taskplane/story_runner.py`
+- `src/taskplane/story_runner_cli.py`
+- `src/taskplane/story_decomposition.py`
+- `src/taskplane/opencode_story_decomposer.py`
 
 These are useful reference implementations of hierarchical execution, but they are one strategy for grouping work, not the substrate’s only valid execution model.
 

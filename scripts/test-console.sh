@@ -20,13 +20,13 @@ run_unit() {
 
 run_integration() {
   printf '\n[console-tests] integration\n'
-  : "${STARDRIFTER_TEST_POSTGRES_DSN:?STARDRIFTER_TEST_POSTGRES_DSN is required for integration tests}"
+  : "${TASKPLANE_TEST_POSTGRES_DSN:?TASKPLANE_TEST_POSTGRES_DSN is required for integration tests}"
   python3 -m pytest -q tests/test_console_read_api.py tests/test_hierarchy_api_actions.py
 }
 
 run_smoke() {
   printf '\n[console-tests] smoke\n'
-  : "${STARDRIFTER_TEST_POSTGRES_DSN:?STARDRIFTER_TEST_POSTGRES_DSN is required for smoke tests}"
+  : "${TASKPLANE_TEST_POSTGRES_DSN:?TASKPLANE_TEST_POSTGRES_DSN is required for smoke tests}"
   python3 -m pytest -q tests/smoke_console_ui.py
 }
 

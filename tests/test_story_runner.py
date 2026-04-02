@@ -1,4 +1,4 @@
-from stardrifter_orchestration_mvp.models import (
+from taskplane.models import (
     ExecutionGuardrailContext,
     StoryVerificationRun,
     VerificationEvidence,
@@ -6,11 +6,11 @@ from stardrifter_orchestration_mvp.models import (
     WorkItem,
     WorkTarget,
 )
-from stardrifter_orchestration_mvp.repository import InMemoryControlPlaneRepository
-from stardrifter_orchestration_mvp.story_runner import run_story_until_settled
-from stardrifter_orchestration_mvp.worker import ExecutionResult
-from stardrifter_orchestration_mvp import story_runner as story_runner_module
-from stardrifter_orchestration_mvp.git_committer import StoryIntegrationResult
+from taskplane.repository import InMemoryControlPlaneRepository
+from taskplane.story_runner import run_story_until_settled
+from taskplane.worker import ExecutionResult
+from taskplane import story_runner as story_runner_module
+from taskplane.git_committer import StoryIntegrationResult
 
 
 def test_run_story_until_settled_completes_all_story_tasks():
@@ -138,6 +138,83 @@ def test_run_story_until_settled_stops_when_task_blocks():
 
     assert result.story_complete is False
     assert result.blocked_work_item_ids == ["issue-47"]
+
+
+def test_run_story_until_settled_handles_checkpoint_then_completion():
+    repository = InMemoryControlPlaneRepository(
+        work_items=[
+            WorkItem(
+                id="issue-58",
+                title="task 58",
+                lane="Lane 02",
+                wave="wave-2",
+                status="pending",
+            ),
+        ],
+        dependencies=[],
+        targets_by_work_id={
+            "issue-58": [
+                WorkTarget(
+                    work_id="issue-58",
+                    target_path="src/stardrifter_engine/campaign/runtime.py",
+                    target_type="file",
+                    owner_lane="Lane 02",
+                    is_frozen=False,
+                    requires_human_approval=False,
+                )
+            ],
+        },
+    )
+    context = ExecutionGuardrailContext(
+        allowed_waves={"wave-2"},
+        frozen_prefixes=("docs/authority/",),
+    )
+    calls = 0
+
+    def executor(work_item, workspace_path=None, execution_context=None):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return ExecutionResult(
+                success=True,
+                summary="checkpoint",
+                result_payload_json={
+                    "execution_kind": "checkpoint",
+                    "phase": "implementing",
+                    "summary": "step 1 complete",
+                },
+            )
+        return ExecutionResult(
+            success=True,
+            summary="done",
+            result_payload_json={
+                "outcome": "done",
+                "summary": "finished",
+                "changed_paths": [
+                    "src/stardrifter_engine/campaign/runtime.py"
+                ],
+            },
+        )
+
+    result = run_story_until_settled(
+        story_issue_number=24,
+        story_work_item_ids=["issue-58"],
+        repository=repository,
+        context=context,
+        worker_name="worker-a",
+        executor=executor,
+        verifier=lambda work_item, workspace_path=None, execution_context=None: VerificationEvidence(
+            work_id=work_item.id,
+            check_type="pytest",
+            command="python3 -m pytest -q",
+            passed=True,
+            output_digest="ok",
+        ),
+        committer=None,
+    )
+
+    assert result.story_complete is True
+    assert calls == 2
 
 
 def test_run_story_until_settled_does_not_mark_empty_story_as_complete():
@@ -332,6 +409,118 @@ def test_run_story_until_settled_requires_story_verification_before_marking_done
     assert writes == []
     assert len(repository.story_verification_runs) == 1
     assert repository.story_verification_runs[0].passed is False
+
+
+def test_run_story_until_settled_accepts_explicit_story_writeback_and_integrator_objects():
+    writes: list[dict[str, object]] = []
+    repository = InMemoryControlPlaneRepository(
+        work_items=[
+            WorkItem(
+                id="issue-156",
+                title="task 156",
+                lane="Lane 06",
+                wave="wave-2",
+                status="done",
+                repo="codefromkarl/stardrifter",
+                source_issue_number=156,
+                canonical_story_issue_number=39,
+            ),
+        ],
+        dependencies=[],
+        targets_by_work_id={
+            "issue-156": [
+                WorkTarget(
+                    work_id="issue-156",
+                    target_path="src/story39.py",
+                    target_type="file",
+                    owner_lane="Lane 06",
+                    is_frozen=False,
+                    requires_human_approval=False,
+                )
+            ]
+        },
+    )
+    context = ExecutionGuardrailContext(
+        allowed_waves={"wave-2"},
+        frozen_prefixes=("docs/authority/",),
+    )
+
+    class IntegrationResult:
+        merged = True
+        promoted = False
+        merge_commit_sha = "abc123"
+        promotion_commit_sha = None
+        blocked_reason = None
+        summary = "merged"
+        pull_number = 77
+        pull_url = "https://example.test/pull/77"
+
+    class ExplicitStoryWriteback:
+        def write_back(
+            self,
+            *,
+            repo: str,
+            issue_number: int,
+            status: str,
+            decision_required: bool = False,
+        ) -> None:
+            writes.append(
+                {
+                    "repo": repo,
+                    "issue_number": issue_number,
+                    "status": status,
+                    "decision_required": decision_required,
+                }
+            )
+
+    class ExplicitStoryIntegrator:
+        def integrate(
+            self,
+            *,
+            story_issue_number: int,
+            story_work_items: list[WorkItem],
+        ) -> IntegrationResult:
+            assert story_issue_number == 39
+            assert [item.id for item in story_work_items] == ["issue-156"]
+            return IntegrationResult()
+
+    result = run_story_until_settled(
+        story_issue_number=39,
+        story_work_item_ids=["issue-156"],
+        repository=repository,
+        context=context,
+        worker_name="worker-a",
+        executor=lambda work_item, workspace_path=None: ExecutionResult(
+            success=True, summary=f"executed {work_item.id}"
+        ),
+        verifier=lambda work_item, workspace_path=None: VerificationEvidence(
+            work_id=work_item.id,
+            check_type="pytest",
+            command="python3 -m pytest -q",
+            passed=True,
+            output_digest="ok",
+        ),
+        committer=None,
+        story_github_writeback=ExplicitStoryWriteback(),
+        story_integrator=ExplicitStoryIntegrator(),
+    )
+
+    assert result.story_complete is True
+    assert writes == [
+        {
+            "repo": "codefromkarl/stardrifter",
+            "issue_number": 39,
+            "status": "done",
+            "decision_required": False,
+        }
+    ]
+    assert repository.story_integration_runs[-1].merged is True
+    assert repository.story_pull_request_links[("codefromkarl/stardrifter", 39)] == {
+        "repo": "codefromkarl/stardrifter",
+        "story_issue_number": 39,
+        "pull_number": 77,
+        "pull_url": "https://example.test/pull/77",
+    }
 
 
 def test_run_story_until_settled_records_story_integration_run():

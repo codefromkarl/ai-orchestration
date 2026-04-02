@@ -1,14 +1,14 @@
 from typing import Any, cast
 
-from stardrifter_orchestration_mvp import (
+from taskplane import (
     story_decomposition as story_decomposition_module,
 )
-from stardrifter_orchestration_mvp.story_decomposition import (
+from taskplane.story_decomposition import (
     DecompositionExecutionResult,
     run_story_decomposition,
     run_shell_story_decomposer,
 )
-from stardrifter_orchestration_mvp.contextweaver_indexing import (
+from taskplane.contextweaver_indexing import (
     FileIndexRegistry,
     IndexArtifactRecord,
 )
@@ -97,6 +97,58 @@ def test_run_story_decomposition_marks_story_needs_refinement():
 
     assert result.final_execution_status == "needs_story_refinement"
     assert captured["execution_status"] == "needs_story_refinement"
+
+
+def test_run_story_decomposition_accepts_explicit_intake_refresher_object():
+    captured: dict[str, object] = {}
+    refresh_calls: list[tuple[object, str]] = []
+
+    class FakeRepository:
+        def set_program_story_execution_status(
+            self, *, repo: str, issue_number: int, execution_status: str
+        ) -> None:
+            captured["repo"] = repo
+            captured["issue_number"] = issue_number
+            captured["execution_status"] = execution_status
+
+    class ExplicitRefresher:
+        def ingest(self, *, connection: object, repo: str) -> None:
+            refresh_calls.append((connection, repo))
+
+    snapshots = iter(
+        [
+            {
+                "story_issue_number": 42,
+                "story_title": "[Story][W0-A] 文档分析与知识蒸馏",
+                "execution_status": "decomposing",
+                "story_task_count": 0,
+            },
+            {
+                "story_issue_number": 42,
+                "story_title": "[Story][W0-A] 文档分析与知识蒸馏",
+                "execution_status": "decomposing",
+                "story_task_count": 2,
+            },
+        ]
+    )
+
+    repository = cast(Any, FakeRepository())
+    result = run_story_decomposition(
+        repo="codefromkarl/stardrifter",
+        story_issue_number=42,
+        repository=repository,
+        story_loader=lambda **kwargs: next(snapshots),
+        decomposer=lambda **kwargs: DecompositionExecutionResult(
+            success=True,
+            outcome="decomposed",
+            summary="created tasks",
+        ),
+        refresher=ExplicitRefresher(),
+    )
+
+    assert result.final_execution_status == "active"
+    assert refresh_calls == [(repository, "codefromkarl/stardrifter")]
+    assert captured["execution_status"] == "active"
 
 
 def test_run_story_decomposition_marks_story_needs_refinement_when_no_projectable_tasks_are_created():
@@ -394,7 +446,7 @@ def test_run_story_decomposition_reports_structured_reason_for_doc_only_implemen
 
 def test_run_story_decomposition_default_fallback_is_disabled(monkeypatch):
     monkeypatch.delenv(
-        "STARDRIFTER_ENABLE_DEFAULT_DECOMPOSITION_FALLBACK", raising=False
+        "TASKPLANE_ENABLE_DEFAULT_DECOMPOSITION_FALLBACK", raising=False
     )
 
     assert story_decomposition_module._fallback_enabled() is False
@@ -464,9 +516,9 @@ def test_run_story_decomposition_default_fallback_can_activate_weak_verification
         created_payloads.append(kwargs["payload"])
         return [103]
 
-    monkeypatch.setenv("STARDRIFTER_ENABLE_DEFAULT_DECOMPOSITION_FALLBACK", "1")
+    monkeypatch.setenv("TASKPLANE_ENABLE_DEFAULT_DECOMPOSITION_FALLBACK", "1")
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.opencode_story_decomposer._create_task_issues_from_payload",
+        "taskplane.opencode_story_decomposer._create_task_issues_from_payload",
         fake_create_task_issues_from_payload,
     )
 
@@ -564,9 +616,9 @@ def test_run_story_decomposition_default_fallback_can_activate_weak_implementati
         created_payloads.append(kwargs["payload"])
         return [104, 105]
 
-    monkeypatch.setenv("STARDRIFTER_ENABLE_DEFAULT_DECOMPOSITION_FALLBACK", "1")
+    monkeypatch.setenv("TASKPLANE_ENABLE_DEFAULT_DECOMPOSITION_FALLBACK", "1")
     monkeypatch.setattr(
-        "stardrifter_orchestration_mvp.opencode_story_decomposer._create_task_issues_from_payload",
+        "taskplane.opencode_story_decomposer._create_task_issues_from_payload",
         fake_create_task_issues_from_payload,
     )
 
@@ -784,7 +836,7 @@ def test_run_shell_story_decomposer_blocks_when_contextweaver_index_fails(
             "story_title": "[Story][01-B] Canonical geometry 入库",
         },
         workdir=tmp_path,
-        decomposer_command="python3 -m stardrifter_orchestration_mvp.opencode_story_decomposer",
+        decomposer_command="python3 -m taskplane.opencode_story_decomposer",
     )
 
     assert result.success is False
@@ -817,7 +869,7 @@ def test_run_shell_story_decomposer_indexes_before_running_decomposer(
         events.append(("decomposer", command))
         return Completed(
             returncode=0,
-            stdout='STARDRIFTER_DECOMPOSITION_RESULT_JSON={"outcome":"decomposed","summary":"ok"}',
+            stdout='TASKPLANE_DECOMPOSITION_RESULT_JSON={"outcome":"decomposed","summary":"ok"}',
         )
 
     monkeypatch.setattr("subprocess.run", fake_run)
@@ -830,7 +882,7 @@ def test_run_shell_story_decomposer_indexes_before_running_decomposer(
             "story_title": "[Story][01-B] Canonical geometry 入库",
         },
         workdir=tmp_path,
-        decomposer_command="python3 -m stardrifter_orchestration_mvp.opencode_story_decomposer",
+        decomposer_command="python3 -m taskplane.opencode_story_decomposer",
     )
 
     assert result.success is True
@@ -839,7 +891,7 @@ def test_run_shell_story_decomposer_indexes_before_running_decomposer(
         ("index", tmp_path.resolve(), "codefromkarl/stardrifter"),
         (
             "decomposer",
-            "python3 -m stardrifter_orchestration_mvp.opencode_story_decomposer",
+            "python3 -m taskplane.opencode_story_decomposer",
         ),
     ]
 
@@ -868,7 +920,7 @@ def test_run_shell_story_decomposer_reuses_ready_index_for_same_repo_snapshot(
             self.stdout = stdout
             self.stderr = stderr
 
-    monkeypatch.setenv("STARDRIFTER_CONTEXTWEAVER_REGISTRY_PATH", str(registry_path))
+    monkeypatch.setenv("TASKPLANE_CONTEXTWEAVER_REGISTRY_PATH", str(registry_path))
     monkeypatch.setattr(
         story_decomposition_module,
         "ensure_contextweaver_index_for_checkout",
@@ -879,7 +931,7 @@ def test_run_shell_story_decomposer_reuses_ready_index_for_same_repo_snapshot(
         commands.append(command)
         return Completed(
             returncode=0,
-            stdout='STARDRIFTER_DECOMPOSITION_RESULT_JSON={"outcome":"decomposed","summary":"ok"}',
+            stdout='TASKPLANE_DECOMPOSITION_RESULT_JSON={"outcome":"decomposed","summary":"ok"}',
         )
 
     monkeypatch.setattr("subprocess.run", fake_run)
@@ -892,12 +944,12 @@ def test_run_shell_story_decomposer_reuses_ready_index_for_same_repo_snapshot(
             "story_title": "[Story][01-B] Canonical geometry 入库",
         },
         workdir=workdir,
-        decomposer_command="python3 -m stardrifter_orchestration_mvp.opencode_story_decomposer",
+        decomposer_command="python3 -m taskplane.opencode_story_decomposer",
     )
 
     assert result.success is True
     assert commands == [
-        "python3 -m stardrifter_orchestration_mvp.opencode_story_decomposer"
+        "python3 -m taskplane.opencode_story_decomposer"
     ]
 
 
@@ -926,7 +978,7 @@ def test_run_shell_story_decomposer_blocks_when_opencode_times_out(
         raise subprocess.TimeoutExpired(command, timeout=45)
 
     monkeypatch.setattr("subprocess.run", fake_run)
-    monkeypatch.setenv("STARDRIFTER_OPENCODE_TIMEOUT_SECONDS", "45")
+    monkeypatch.setenv("TASKPLANE_OPENCODE_TIMEOUT_SECONDS", "45")
 
     result = run_shell_story_decomposer(
         repo="codefromkarl/stardrifter",
@@ -936,7 +988,7 @@ def test_run_shell_story_decomposer_blocks_when_opencode_times_out(
             "story_title": "[Story][01-B] Canonical geometry 入库",
         },
         workdir=tmp_path,
-        decomposer_command="python3 -m stardrifter_orchestration_mvp.opencode_story_decomposer",
+        decomposer_command="python3 -m taskplane.opencode_story_decomposer",
     )
 
     assert result.success is False
@@ -969,7 +1021,7 @@ def test_run_shell_story_decomposer_blocks_when_payload_is_missing_on_success(
             "story_title": "[Story][01-B] Canonical geometry 入库",
         },
         workdir=tmp_path,
-        decomposer_command="python3 -m stardrifter_orchestration_mvp.opencode_story_decomposer",
+        decomposer_command="python3 -m taskplane.opencode_story_decomposer",
     )
 
     assert result.success is False
@@ -1001,7 +1053,7 @@ def test_run_shell_story_decomposer_preserves_partial_output_on_timeout(
         )
 
     monkeypatch.setattr("subprocess.run", fake_run)
-    monkeypatch.setenv("STARDRIFTER_OPENCODE_TIMEOUT_SECONDS", "45")
+    monkeypatch.setenv("TASKPLANE_OPENCODE_TIMEOUT_SECONDS", "45")
 
     result = run_shell_story_decomposer(
         repo="codefromkarl/stardrifter",
@@ -1011,7 +1063,7 @@ def test_run_shell_story_decomposer_preserves_partial_output_on_timeout(
             "story_title": "[Story][01-B] Canonical geometry 入库",
         },
         workdir=tmp_path,
-        decomposer_command="python3 -m stardrifter_orchestration_mvp.opencode_story_decomposer",
+        decomposer_command="python3 -m taskplane.opencode_story_decomposer",
     )
 
     assert result.success is False
@@ -1038,7 +1090,7 @@ def test_run_shell_story_decomposer_blocks_when_outcome_is_unsupported(
             return Completed(returncode=0, stdout="indexed")
         return Completed(
             returncode=0,
-            stdout='STARDRIFTER_DECOMPOSITION_RESULT_JSON={"outcome":"thinking","summary":"still thinking","reason_code":"awaiting_context"}',
+            stdout='TASKPLANE_DECOMPOSITION_RESULT_JSON={"outcome":"thinking","summary":"still thinking","reason_code":"awaiting_context"}',
         )
 
     monkeypatch.setattr("subprocess.run", fake_run)
@@ -1051,7 +1103,7 @@ def test_run_shell_story_decomposer_blocks_when_outcome_is_unsupported(
             "story_title": "[Story][01-B] Canonical geometry 入库",
         },
         workdir=tmp_path,
-        decomposer_command="python3 -m stardrifter_orchestration_mvp.opencode_story_decomposer",
+        decomposer_command="python3 -m taskplane.opencode_story_decomposer",
     )
 
     assert result.success is False

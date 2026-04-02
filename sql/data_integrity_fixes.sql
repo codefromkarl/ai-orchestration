@@ -1,5 +1,5 @@
 -- ============================================================================
--- Data Integrity Views and Constraints for Stardrifter Orchestration
+-- Data Integrity Views and Constraints for Taskplane
 -- ============================================================================
 -- Purpose: Add database-level checks for work_item data integrity
 -- Date: 2026-03-23

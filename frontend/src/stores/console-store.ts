@@ -10,6 +10,7 @@ import {
   DrawerDetailItem,
   WorkspaceViewId,
   RunningJobSummary,
+  RuntimeObservationItem,
   NotificationItem,
   AgentStatusItem,
   AgentEfficiencyStat,
@@ -25,6 +26,7 @@ import {
   getEpicStoryTree,
   getEpicDetail,
   getRunningJobs,
+  getRuntimeObservability,
   getJobDetail,
   getNotifications,
   getFailedNotifications,
@@ -118,6 +120,7 @@ export interface ConsoleStore {
   epicRows: EpicOverviewRow[];
   epicTreeRows: EpicStoryTreeRow[];
   runningJobs: RunningJobSummary[];
+  runtimeObservations: RuntimeObservationItem[];
   notifications: NotificationItem[];
   failedNotifications: NotificationItem[];
   agents: AgentStatusItem[];
@@ -202,6 +205,7 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
   epicRows: [],
   epicTreeRows: [],
   runningJobs: [],
+  runtimeObservations: [],
   notifications: [],
   failedNotifications: [],
   agents: [],
@@ -275,6 +279,7 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
         epicRowsResponse,
         epicStoryTreeResponse,
         runningJobsResponse,
+        runtimeObservabilityResponse,
         notificationsResponse,
         failedNotificationsResponse,
         agentsResponse,
@@ -285,6 +290,7 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
         getEpicRows(repoName).catch(() => ({ repo: repoName, rows: [] })),
         getEpicStoryTree(repoName).catch(() => ({ repo: repoName, rows: [] })),
         getRunningJobs(repoName).catch(() => ({ repo: repoName, jobs: [] })),
+        getRuntimeObservability(repoName).catch(() => ({ repo: repoName, items: [] })),
         getNotifications(repoName).catch(() => ({ notifications: [] })),
         getFailedNotifications(repoName).catch(() => ({ notifications: [] })),
         getAgents(repoName).catch(() => ({ agents: [] })),
@@ -311,6 +317,33 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
         epicRows: loadedData.epicRows,
         epicTreeRows: loadedData.epicTreeRows,
         runningJobs: loadedData.runningJobs,
+        runtimeObservations: runtimeObservabilityResponse.items.map((item) => ({
+          workId: item.work_id,
+          issueNumber: item.source_issue_number,
+          title: item.title || item.work_id,
+          status: item.status as TaskStatus | undefined,
+          lane: item.lane,
+          wave: item.wave,
+          blockedReason: item.blocked_reason,
+          decisionRequired: item.decision_required,
+          lastFailureReason: item.last_failure_reason,
+          workerName: item.active_claim_worker_name,
+          sessionId: item.session_id,
+          sessionStatus: item.session_status,
+          sessionAttemptIndex: item.session_attempt_index,
+          sessionCurrentPhase: item.session_current_phase,
+          sessionWaitingReason: item.session_waiting_reason,
+          sessionUpdatedAt: item.session_updated_at,
+          checkpointSummary: item.last_checkpoint_summary,
+          checkpointNextAction: item.last_checkpoint_next_action,
+          artifactId: item.artifact_id,
+          artifactType: item.artifact_type,
+          artifactKey: item.artifact_key,
+          artifactSummary: typeof item.artifact_metadata?.summary === 'string'
+            ? item.artifact_metadata.summary
+            : undefined,
+          artifactCreatedAt: item.artifact_created_at,
+        })),
         notifications: loadedData.notifications,
         failedNotifications: loadedData.failedNotifications,
         agents: loadedData.agents,
@@ -328,6 +361,7 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
         epicRows: [],
         epicTreeRows: [],
         runningJobs: [],
+        runtimeObservations: [],
         notifications: [],
         failedNotifications: [],
         agents: [],
@@ -410,6 +444,7 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
         epicRows: [],
         epicTreeRows: [],
         runningJobs: [],
+        runtimeObservations: [],
         notifications: [],
         failedNotifications: [],
         agents: [],
