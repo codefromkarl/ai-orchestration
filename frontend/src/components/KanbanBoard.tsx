@@ -1,10 +1,14 @@
 import { useMemo, useState } from 'react';
 import { MoreHorizontal } from 'lucide-react';
-import { EpicOverviewRow } from '../types';
+import { EpicOverviewRow, SystemStatus } from '../types';
+import { ConsoleOnboarding } from './ConsoleOnboarding';
 
 interface KanbanBoardProps {
   epicRows: EpicOverviewRow[];
   onOpenEpicDetail: (epicIssueNumber: number) => void;
+  repo: string;
+  systemStatus: SystemStatus | null;
+  onOpenSystemPanel: () => void;
   hidden?: boolean;
 }
 
@@ -139,7 +143,14 @@ function EpicIssueCard({
   );
 }
 
-export function KanbanBoard({ epicRows, onOpenEpicDetail, hidden = false }: KanbanBoardProps) {
+export function KanbanBoard({
+  epicRows,
+  onOpenEpicDetail,
+  repo,
+  systemStatus,
+  onOpenSystemPanel,
+  hidden = false,
+}: KanbanBoardProps) {
   const [openMenuEpic, setOpenMenuEpic] = useState<number | null>(null);
 
   return (
@@ -189,11 +200,11 @@ export function KanbanBoard({ epicRows, onOpenEpicDetail, hidden = false }: Kanb
       </div>
 
       {epicRows.length === 0 && (
-        <div
-          className="rounded-xl border border-border border-dashed bg-surface p-8 text-center text-sm text-text-secondary"
-        >
-          当前仓库还没有可展示的 Epic。
-        </div>
+        <ConsoleOnboarding
+          repo={repo}
+          systemStatus={systemStatus}
+          onOpenSystemPanel={onOpenSystemPanel}
+        />
       )}
     </section>
   );

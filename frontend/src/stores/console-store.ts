@@ -1,14 +1,12 @@
 import { create } from 'zustand';
 import {
   WorkItem,
-  CommandMessage,
   AttentionItem,
   ConsoleTabId,
-  ConsoleNavSection,
   RepoSummary,
+  SystemStatus,
   EpicOverviewRow,
   DrawerDetailItem,
-  WorkspaceViewId,
   RunningJobSummary,
   RuntimeObservationItem,
   NotificationItem,
@@ -19,6 +17,8 @@ import {
 } from '../types';
 import {
   getRepositories,
+  getSystemStatus,
+  getIntents,
   getWorkItems,
   getGovernancePriority,
   getRepoSummary,
@@ -35,7 +35,29 @@ import {
   getStoryDetail,
   getTaskDetail,
   postConsoleAction,
+  submitIntent,
+  answerIntent,
+  approveIntent,
+  rejectIntent,
+  reviseIntent,
 } from '../api';
+import {
+  createInitialIntakeState,
+  createIntakeSlice,
+  type IntakeSliceActions,
+  type IntakeSliceState,
+} from './console-intake-slice';
+import {
+  buildSummaryStats,
+  filterWorkItems,
+  getTopRepoAggregateStats,
+  type RepoAggregateStats,
+} from './console-selectors';
+import {
+  buildAllReposPatch,
+  buildSingleRepoPatch,
+  resolveRepoInitialization,
+} from './console-repo-data-helpers';
 import {
   buildAttentionItems,
   buildEpicDrawerItem,
@@ -43,7 +65,6 @@ import {
   buildLoadedConsoleData,
   buildStoryDrawerItem,
   buildTaskDrawerItem,
-  mapWorkItemToDisplay,
 } from '../utils/console-view-models';
 import { applyTheme, getStoredTheme, Theme } from '../utils/theme-utils';
 import {
@@ -52,16 +73,6 @@ import {
   getStoredConsoleFilters,
   getStoredSidebarCollapsed,
 } from '../utils/console-storage';
-
-// --- Helper types ---
-interface RepoAggregateStats {
-  repo: string;
-  totalTasks: number;
-  activeTasks: number;
-  blockedTasks: number;
-  completedTasks: number;
-  attentionCount: number;
-}
 
 interface ActionHistoryItem {
   id: string;
@@ -95,22 +106,20 @@ function summarizeActionPayload(payload: Record<string, unknown>): string {
   return action || accepted || '操作已提交';
 }
 
-function buildRepoAggregateStats(repo: string, items: WorkItem[], attentionCount: number): RepoAggregateStats {
-  const completedTasks = items.filter((item) => item.status === 'done').length;
-  const blockedTasks = items.filter((item) => item.status === 'blocked').length;
-  const activeTasks = items.length - completedTasks;
-  return { repo, totalTasks: items.length, activeTasks, blockedTasks, completedTasks, attentionCount };
-}
-
 const DEFAULT_REPO = 'codefromkarl/stardrifter';
 const THEMES: Theme[] = ['light', 'dark', 'cyberpunk', 'programmer'];
+const intakeDependencies = {
+  submitIntent,
+  answerIntent,
+  approveIntent,
+  rejectIntent,
+  reviseIntent,
+};
 
 // --- Store interface ---
-export interface ConsoleStore {
+export interface ConsoleStore extends IntakeSliceState, IntakeSliceActions {
   // Navigation
   activeTab: ConsoleTabId;
-  activeNavSection: ConsoleNavSection;
-  activeWorkspaceView: WorkspaceViewId;
   sidebarCollapsed: boolean;
   // Data
   repo: string;
@@ -128,6 +137,7 @@ export interface ConsoleStore {
   attentionItems: AttentionItem[];
   repoAggregateStats: RepoAggregateStats[];
   repoSummary: RepoSummary | null;
+  systemStatus: SystemStatus | null;
   // Filters
   taskSearchQuery: string;
   taskStatusFilter: TaskStatus | 'all';
@@ -135,7 +145,6 @@ export interface ConsoleStore {
   loading: boolean;
   error: string | null;
   selectedItem: DrawerDetailItem | null;
-  commandHistory: CommandMessage[];
   currentTheme: Theme;
   locale: 'zh' | 'en';
   pendingAction: { actionUrl: string; label: string } | null;
@@ -147,8 +156,6 @@ export interface ConsoleStore {
 
   // Actions — Navigation
   setActiveTab: (tab: ConsoleTabId) => void;
-  setActiveNavSection: (section: ConsoleNavSection) => void;
-  setActiveWorkspaceView: (view: WorkspaceViewId) => void;
   toggleSidebar: () => void;
 
   // Actions — Data loading
@@ -171,9 +178,6 @@ export interface ConsoleStore {
   handleConfirmAction: () => Promise<void>;
   handleCancelAction: () => void;
 
-  // Actions — Command
-  handleSendCommand: (command: string) => void;
-
   // Actions — Theme & Locale
   toggleTheme: () => void;
   setLocale: (locale: 'zh' | 'en') => void;
@@ -191,11 +195,9 @@ export interface ConsoleStore {
 
 const storedFilters = typeof window !== 'undefined' ? getStoredConsoleFilters(window.localStorage) : {};
 
-export const useConsoleStore = create<ConsoleStore>((set, get) => ({
+export const useConsoleStore = create<ConsoleStore>((set, get, store) => ({
   // Navigation
   activeTab: 'kanban',
-  activeNavSection: 'overview',
-  activeWorkspaceView: 'epic_overview',
   sidebarCollapsed: typeof window !== 'undefined' ? getStoredSidebarCollapsed(window.localStorage) : false,
   // Data
   repo: storedFilters.repo ?? '',
@@ -211,8 +213,10 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
   agents: [],
   agentStats: [],
   attentionItems: [],
+  ...createInitialIntakeState(),
   repoAggregateStats: [],
   repoSummary: null,
+  systemStatus: null,
   // Filters
   taskSearchQuery: storedFilters.taskSearchQuery ?? '',
   taskStatusFilter: storedFilters.taskStatusFilter ?? 'all',
@@ -220,7 +224,6 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
   loading: false,
   error: null,
   selectedItem: null,
-  commandHistory: [],
   currentTheme: getStoredTheme(),
   locale: 'zh',
   pendingAction: null,
@@ -232,27 +235,30 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
 
   // --- Navigation actions ---
   setActiveTab: (tab) => set({ activeTab: tab }),
-  setActiveNavSection: (section) => set({ activeNavSection: section }),
-  setActiveWorkspaceView: (view) => set({ activeWorkspaceView: view }),
   toggleSidebar: () => set((state) => {
     const next = !state.sidebarCollapsed;
     try { window.localStorage.setItem(CONSOLE_SIDEBAR_COLLAPSED_STORAGE_KEY, next ? 'true' : 'false'); } catch { /* ignore */ }
     return { sidebarCollapsed: next };
   }),
+  ...createIntakeSlice(intakeDependencies)(set, get, store),
 
   // --- Data loading ---
   initializeRepos: async () => {
     try {
-      const response = await getRepositories();
-      const repoOptions = response.repositories.map((item) => item.repo).filter(Boolean);
+      const [systemStatusResponse, repositoryResponse] = await Promise.all([
+        getSystemStatus().catch(() => null),
+        getRepositories().catch(() => ({ repositories: [] })),
+      ]);
       const { repo, repoScope } = get();
+      const { repoOptions, initialRepo } = resolveRepoInitialization({
+        currentRepo: repo,
+        repoScope,
+        repositoryRepos: repositoryResponse.repositories.map((item) => item.repo).filter(Boolean),
+        systemStatus: systemStatusResponse,
+        defaultRepo: DEFAULT_REPO,
+      });
 
-      set({ availableRepos: repoOptions });
-
-      const preferredRepo = repo && repoOptions.includes(repo) ? repo : '';
-      const initialRepo = preferredRepo || (repoOptions.includes(DEFAULT_REPO)
-        ? DEFAULT_REPO
-        : repoOptions[0] || '');
+      set({ availableRepos: repoOptions, systemStatus: systemStatusResponse });
 
       if (!initialRepo && repoScope !== 'all') return;
 
@@ -264,7 +270,7 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
         void get().loadRepo(initialRepo);
       }
     } catch {
-      set({ availableRepos: [] });
+      set({ availableRepos: [], systemStatus: null });
     }
   },
 
@@ -275,6 +281,7 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
     try {
       const [
         workItemsResponse,
+        intentsResponse,
         priorityResponse,
         epicRowsResponse,
         epicStoryTreeResponse,
@@ -286,6 +293,7 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
         agentStatsResponse,
       ] = await Promise.all([
         getWorkItems(repoName),
+        getIntents(repoName).catch(() => ({ repo: repoName, items: [], count: 0 })),
         getGovernancePriority(repoName).catch(() => ({ tasks: [] })),
         getEpicRows(repoName).catch(() => ({ repo: repoName, rows: [] })),
         getEpicStoryTree(repoName).catch(() => ({ repo: repoName, rows: [] })),
@@ -301,6 +309,7 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
       const loadedData = buildLoadedConsoleData({
         repoName,
         workItemsResponse,
+        intentsResponse,
         epicRowsResponse,
         epicStoryTreeResponse,
         runningJobsResponse,
@@ -312,50 +321,14 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
         priorityResponse,
       });
 
-      set({
-        workItems: loadedData.workItems,
-        epicRows: loadedData.epicRows,
-        epicTreeRows: loadedData.epicTreeRows,
-        runningJobs: loadedData.runningJobs,
-        runtimeObservations: runtimeObservabilityResponse.items.map((item) => ({
-          workId: item.work_id,
-          issueNumber: item.source_issue_number,
-          title: item.title || item.work_id,
-          status: item.status as TaskStatus | undefined,
-          lane: item.lane,
-          wave: item.wave,
-          blockedReason: item.blocked_reason,
-          decisionRequired: item.decision_required,
-          lastFailureReason: item.last_failure_reason,
-          workerName: item.active_claim_worker_name,
-          sessionId: item.session_id,
-          sessionStatus: item.session_status,
-          sessionAttemptIndex: item.session_attempt_index,
-          sessionCurrentPhase: item.session_current_phase,
-          sessionWaitingReason: item.session_waiting_reason,
-          sessionUpdatedAt: item.session_updated_at,
-          checkpointSummary: item.last_checkpoint_summary,
-          checkpointNextAction: item.last_checkpoint_next_action,
-          artifactId: item.artifact_id,
-          artifactType: item.artifact_type,
-          artifactKey: item.artifact_key,
-          artifactSummary: typeof item.artifact_metadata?.summary === 'string'
-            ? item.artifact_metadata.summary
-            : undefined,
-          artifactCreatedAt: item.artifact_created_at,
-        })),
-        notifications: loadedData.notifications,
-        failedNotifications: loadedData.failedNotifications,
-        agents: loadedData.agents,
-        agentStats: loadedData.agentStats,
-        repoSummary: loadedData.repoSummary,
-        attentionItems: loadedData.attentionItems,
-        repoAggregateStats: [],
-        selectedItem: null,
-        activeNavSection: 'overview',
-        activeWorkspaceView: 'epic_overview',
-        loading: false,
-      });
+      set(
+        buildSingleRepoPatch({
+          loadedData,
+          intents: intentsResponse.items,
+          runtimeObservationItems: runtimeObservabilityResponse.items,
+          systemStatus: get().systemStatus,
+        }),
+      );
     } catch (err) {
       set({
         epicRows: [],
@@ -367,6 +340,7 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
         agents: [],
         agentStats: [],
         repoSummary: null,
+        intents: [],
         repoAggregateStats: [],
         error: err instanceof Error ? err.message : '加载失败',
         loading: false,
@@ -397,73 +371,15 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
         })),
       ]);
 
-      const mergedWorkItems = workItemResponses.flatMap((response, index) => {
-        const repoName = repos[index];
-        return response.items.map((item) => mapWorkItemToDisplay(item, repoName));
-      });
-
-      const mergedAttention = priorityResponses
-        .flatMap((response, index) => {
-          const repoName = repos[index];
-          return buildAttentionItems(response).map((item) => ({
-            ...item,
-            id: `${repoName}:${item.id}`,
-            title: `[${repoName}] ${item.title}`,
-          }));
-        })
-        .sort((a, b) => b.priorityScore - a.priorityScore)
-        .slice(0, 120);
-
-      const aggregateStats = repos.map((repoName, index) => {
-        const scopedItems = mergedWorkItems.filter((item) => item.repo === repoName);
-        const attentionCount = mergedAttention.filter((item) => item.title.startsWith(`[${repoName}]`)).length;
-        const summary = summaryResponses[index];
-        if (summary) {
-          return {
-            repo: repoName,
-            totalTasks: summary.total_tasks ?? summary.summary?.total_tasks ?? scopedItems.length,
-            activeTasks: summary.active_tasks ?? summary.summary?.active_tasks ?? scopedItems.filter((item) => item.status !== 'done').length,
-            blockedTasks: summary.blocked_tasks ?? summary.summary?.blocked_tasks ?? scopedItems.filter((item) => item.status === 'blocked').length,
-            completedTasks: summary.completed_tasks ?? summary.summary?.completed_tasks ?? scopedItems.filter((item) => item.status === 'done').length,
-            attentionCount,
-          } as RepoAggregateStats;
-        }
-        return buildRepoAggregateStats(repoName, scopedItems, attentionCount);
-      });
-
-      const completedTasks = aggregateStats.reduce((sum, item) => sum + item.completedTasks, 0);
-      const blockedTasks = aggregateStats.reduce((sum, item) => sum + item.blockedTasks, 0);
-      const activeTasks = aggregateStats.reduce((sum, item) => sum + item.activeTasks, 0);
-
-      const newTab = activeTab === 'kanban' ? 'repository' as ConsoleTabId : activeTab;
-
-      set({
-        workItems: mergedWorkItems,
-        attentionItems: mergedAttention,
-        repoAggregateStats: aggregateStats,
-        epicRows: [],
-        epicTreeRows: [],
-        runningJobs: [],
-        runtimeObservations: [],
-        notifications: [],
-        failedNotifications: [],
-        agents: [],
-        agentStats: [],
-        selectedItem: null,
-        activeNavSection: 'overview',
-        activeWorkspaceView: 'task_repository',
-        repoSummary: {
-          repo: 'all',
-          totalEpics: 0,
-          totalStories: 0,
-          totalTasks: mergedWorkItems.length,
-          activeTasks,
-          completedTasks,
-          blockedTasks,
-        },
-        activeTab: newTab,
-        loading: false,
-      });
+      set(
+        buildAllReposPatch({
+          repos,
+          workItemResponses,
+          attentionItemsByRepo: priorityResponses.map((response) => buildAttentionItems(response)),
+          summaryResponses,
+          activeTab,
+        }),
+      );
     } catch (err) {
       set({
         repoAggregateStats: [],
@@ -502,7 +418,6 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
       const matchingRow = epicRows.find((row) => row.epic_issue_number === epicIssueNumber);
       set({
         selectedItem: buildEpicDrawerItem({ detail, matchingRow }),
-        activeNavSection: 'detail',
       });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Epic 详情加载失败' });
@@ -516,7 +431,6 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
       const detail = await getJobDetail(repo, jobId);
       set({
         selectedItem: buildJobDrawerItem(detail),
-        activeNavSection: 'detail',
       });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Job 详情加载失败' });
@@ -530,7 +444,6 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
       const detail = await getStoryDetail(repo, storyIssueNumber);
       set({
         selectedItem: buildStoryDrawerItem({ detail, repo, storyIssueNumber }),
-        activeNavSection: 'detail',
       });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Story 详情加载失败' });
@@ -545,7 +458,6 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
       const detail = await getTaskDetail(targetRepo, workId);
       set({
         selectedItem: buildTaskDrawerItem({ detail, repo: targetRepo, workId }),
-        activeNavSection: 'detail',
       });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Task 详情加载失败' });
@@ -575,11 +487,10 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
         priority: item.priority,
         metaSummary: item.repo ? `repo: ${item.repo}` : undefined,
       },
-      activeNavSection: 'detail',
     });
   },
 
-  closeDrawer: () => set({ selectedItem: null, activeNavSection: 'overview' }),
+  closeDrawer: () => set({ selectedItem: null }),
 
   // --- Action handlers ---
   handleActionSelect: (actionUrl: string, label: string) => {
@@ -587,7 +498,7 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
   },
 
   handleConfirmAction: async () => {
-    const { pendingAction, repoScope, repo } = get();
+    const { pendingAction, repoScope, repo, selectedItem } = get();
     if (!pendingAction) return;
     if (repoScope === 'single' && !repo) {
       set({ actionError: '请先选择仓库后再执行操作。' });
@@ -595,6 +506,7 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
     }
 
     const action = pendingAction;
+    const selectedDetail = selectedItem;
     set({ isActionSubmitting: true, actionError: null });
 
     try {
@@ -612,7 +524,6 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
       set({
         pendingAction: null,
         selectedItem: null,
-        activeNavSection: 'overview',
         actionNotice: `已提交操作：${action.label} · ${message}`,
         actionHistory: [newHistory, ...actionHistory].slice(0, 12),
         isActionSubmitting: false,
@@ -623,6 +534,11 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
         await get().loadAllRepos();
       } else {
         await get().loadRepo(repo);
+        if (selectedDetail?.type === 'epic') {
+          await get().openEpicDetail(selectedDetail.number);
+        } else if (selectedDetail?.type === 'story') {
+          await get().openStoryDetail(selectedDetail.number);
+        }
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : '操作执行失败';
@@ -648,24 +564,6 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
     if (!isActionSubmitting) {
       set({ pendingAction: null, actionError: null });
     }
-  },
-
-  // --- Command ---
-  handleSendCommand: (command: string) => {
-    const { commandHistory } = get();
-    const userMessage: CommandMessage = {
-      id: `msg-${Date.now()}-user`,
-      type: 'user',
-      content: command,
-      timestamp: new Date(),
-    };
-    const systemMessage: CommandMessage = {
-      id: `msg-${Date.now()}-system`,
-      type: 'system',
-      content: `收到指令：${command}。正在处理...`,
-      timestamp: new Date(),
-    };
-    set({ commandHistory: [...commandHistory, userMessage, systemMessage] });
   },
 
   // --- Theme & Locale ---
@@ -705,7 +603,7 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
   },
 
   // --- Config ---
-  setConfigPanel: (panel) => set({ configPanel: panel }),
+  setConfigPanel: (panel) => set((state) => ({ configPanel: state.configPanel === panel ? null : panel })),
 }));
 
 // --- Helpers ---
@@ -734,18 +632,10 @@ export function useFilteredWorkItems() {
   const workItems = useConsoleStore((s) => s.workItems);
   const taskSearchQuery = useConsoleStore((s) => s.taskSearchQuery);
   const taskStatusFilter = useConsoleStore((s) => s.taskStatusFilter);
-
-  const keyword = taskSearchQuery.trim().toLowerCase();
-  return workItems.filter((item) => {
-    const matchesStatus = taskStatusFilter === 'all' || item.status === taskStatusFilter;
-    if (!matchesStatus) return false;
-    if (!keyword) return true;
-    const numberText = String(item.number);
-    return (
-      item.title.toLowerCase().includes(keyword) ||
-      numberText.includes(keyword) ||
-      (item.repo ? item.repo.toLowerCase().includes(keyword) : false)
-    );
+  return filterWorkItems({
+    workItems,
+    taskSearchQuery,
+    taskStatusFilter,
   });
 }
 
@@ -773,28 +663,14 @@ export function useSummarySubtitle() {
 
 export function useSummaryStats() {
   const { repoSummary, workItems, attentionItems } = useConsoleStore();
-  if (repoSummary) {
-    return [
-      { label: '史诗', value: repoSummary.totalEpics },
-      { label: '故事', value: repoSummary.totalStories },
-      { label: '任务', value: repoSummary.totalTasks },
-      { label: '活跃', value: repoSummary.activeTasks },
-      { label: '阻塞', value: repoSummary.blockedTasks },
-    ];
-  }
-  return [
-    { label: '任务', value: workItems.length },
-    { label: '关注项', value: attentionItems.length },
-  ];
+  return buildSummaryStats({
+    repoSummary,
+    workItems,
+    attentionItems,
+  });
 }
 
 export function useTopRepoAggregateStats() {
   const repoAggregateStats = useConsoleStore((s) => s.repoAggregateStats);
-  return [...repoAggregateStats]
-    .sort((a, b) => {
-      const scoreA = a.blockedTasks * 3 + a.attentionCount * 2 + a.activeTasks;
-      const scoreB = b.blockedTasks * 3 + b.attentionCount * 2 + b.activeTasks;
-      return scoreB - scoreA;
-    })
-    .slice(0, 8);
+  return getTopRepoAggregateStats(repoAggregateStats);
 }

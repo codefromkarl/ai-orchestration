@@ -1,48 +1,43 @@
-import { NavLink, useNavigate } from 'react-router-dom';
-import { Diamond, Settings, Cpu, Palette } from 'lucide-react';
+import { NavLink } from 'react-router-dom';
+import { Diamond, Palette, Cpu, Settings } from 'lucide-react';
 import { useConsoleStore } from '../stores/console-store';
 import { ConsoleTabId } from '../types';
 
 const tabs: Array<{ id: ConsoleTabId; label: string; path: string }> = [
-  { id: 'kanban', label: '信息室', path: '/kanban' },
+  { id: 'kanban', label: '总览', path: '/kanban' },
   { id: 'command', label: '指挥所', path: '/command' },
-  { id: 'repository', label: '任务仓库', path: '/repository' },
-  { id: 'hierarchy', label: '治理层级', path: '/hierarchy' },
+  { id: 'repository', label: '任务', path: '/repository' },
+  { id: 'hierarchy', label: '层级', path: '/hierarchy' },
 ];
 
 export function TopNav() {
-  const navigate = useNavigate();
   const store = useConsoleStore();
 
+  // Summary stats for top bar
+  const blockedCount = store.workItems.filter((i) => i.status === 'blocked').length;
+  const inProgressCount = store.workItems.filter((i) => i.status === 'in_progress').length;
+  const decisionCount = store.workItems.filter((i) => i.decisionRequired).length;
+
   return (
-    <header className="border-b border-border bg-surface px-6 py-3">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <Diamond
-            className="h-5 w-5 text-primary"
-            fill="currentColor"
-          />
-          <span className="text-lg font-semibold text-text">
-            Stardrifter
-          </span>
+    <header className="border-b border-border bg-surface">
+      {/* Primary row: logo + tabs + repo + actions */}
+      <div className="flex items-center justify-between gap-4 px-6 py-2.5">
+        <div className="flex items-center gap-3">
+          <Diamond className="h-5 w-5 text-primary" fill="currentColor" />
+          <span className="text-base font-semibold text-text">Taskplane</span>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-1.5">
           {tabs.map((tab) => (
             <NavLink
               key={tab.id}
               to={tab.path}
               className={({ isActive }) =>
-                `rounded-full px-4 py-1.5 text-sm font-medium transition-all ${
+                `rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                   isActive
-                    ? 'text-white shadow-sm'
+                    ? 'bg-primary text-white'
                     : 'text-text-secondary hover:bg-surface-hover'
                 }`
-              }
-              style={({ isActive }) =>
-                isActive
-                  ? { background: 'linear-gradient(to right, var(--color-primary), var(--color-primary-hover))' }
-                  : { backgroundColor: 'transparent' }
               }
             >
               {tab.label}
@@ -50,80 +45,64 @@ export function TopNav() {
           ))}
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <select
             id="repo-input"
-            className="w-48 rounded-md border border-border bg-surface-hover px-3 py-1 text-sm text-text"
+            className="w-40 rounded-md border border-border bg-surface-hover px-2.5 py-1.5 text-xs text-text"
             value={store.repo}
             onChange={(e) => store.setRepo(e.target.value)}
           >
-            {store.availableRepos.length === 0 && <option value="">可用仓库加载中...</option>}
-            {store.availableRepos.map((repoOption) => (
-              <option key={repoOption} value={repoOption}>
-                {repoOption}
-              </option>
+            {store.availableRepos.length === 0 && <option value="">加载中...</option>}
+            {store.availableRepos.map((r) => (
+              <option key={r} value={r}>{r}</option>
             ))}
           </select>
           <button
-            id="load-console-btn"
             type="button"
             onClick={() => store.handleLoadConsole()}
-            className="rounded-md px-3 py-1 text-sm font-medium text-white"
-            style={{
-              background: 'linear-gradient(to right, var(--color-primary), var(--color-primary-hover))',
-            }}
+            className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-white"
           >
-            加载
+            刷新
           </button>
-          <div className="flex items-center gap-1 rounded-md border border-border px-1 py-1">
-            <button
-              id="locale-en-btn"
-              type="button"
-              onClick={() => store.setLocale('en')}
-              className={`rounded px-2 py-1 text-xs font-medium ${
-                store.locale === 'en' ? 'bg-primary text-white' : 'bg-transparent text-text-secondary'
-              }`}
-            >
-              EN
-            </button>
-            <button
-              id="locale-zh-btn"
-              type="button"
-              onClick={() => store.setLocale('zh')}
-              className={`rounded px-2 py-1 text-xs font-medium ${
-                store.locale === 'zh' ? 'bg-primary text-white' : 'bg-transparent text-text-secondary'
-              }`}
-            >
-              中文
-            </button>
-          </div>
           <button
             type="button"
             onClick={() => store.toggleTheme()}
-            className="rounded-md p-2 text-text-secondary transition-colors hover:bg-surface-hover hover:text-primary"
-            title={`主题：${store.currentTheme}`}
-            aria-label={`切换主题，当前为 ${store.currentTheme}`}
+            className="rounded-md p-1.5 text-text-secondary hover:bg-surface-hover hover:text-primary"
+            aria-label="切换主题"
           >
-            <Palette className="h-5 w-5" />
+            <Palette className="h-4 w-4" />
           </button>
           <button
             type="button"
             onClick={() => store.setConfigPanel('model')}
-            className="rounded-md p-2 text-text-secondary transition-colors hover:bg-surface-hover hover:text-primary"
-            title="模型配置"
+            className="rounded-md p-1.5 text-text-secondary hover:bg-surface-hover hover:text-primary"
+            aria-label="模型配置"
           >
-            <Cpu className="h-5 w-5" />
+            <Cpu className="h-4 w-4" />
           </button>
           <button
             type="button"
             onClick={() => store.setConfigPanel('system')}
-            className="rounded-md p-2 text-text-secondary transition-colors hover:bg-surface-hover hover:text-primary"
-            title="系统配置"
+            className="rounded-md p-1.5 text-text-secondary hover:bg-surface-hover hover:text-primary"
+            aria-label="系统配置"
           >
-            <Settings className="h-5 w-5" />
+            <Settings className="h-4 w-4" />
           </button>
         </div>
       </div>
+
+      {/* Secondary row: status badges + filters */}
+      {store.repoScope === 'all' && store.workItems.length > 0 && (
+        <div className="flex items-center gap-3 border-t border-border px-6 py-1.5 text-xs text-text-secondary">
+          <span className="font-medium text-text">{store.workItems.length} 任务</span>
+          <span className="text-text-secondary">·</span>
+          <span className="text-blue-500">{inProgressCount} 进行中</span>
+          <span className="text-text-secondary">·</span>
+          <span className="text-red-500">{blockedCount} 阻塞</span>
+          <span className="text-text-secondary">·</span>
+          <span className="text-orange-500">{decisionCount} 待决策</span>
+        </div>
+      )}
     </header>
   );
 }

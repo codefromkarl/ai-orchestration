@@ -168,6 +168,7 @@ export function buildEpicDrawerItem(args: {
     detail.epic.lane,
     detail.stories.length ? `${detail.stories.length} stories` : undefined,
     detail.active_tasks.length ? `${detail.active_tasks.length} active tasks` : undefined,
+    detail.operator_requests.length ? `${detail.operator_requests.length} open requests` : undefined,
   ].filter((value, index, array) => Boolean(value) && array.indexOf(value) === index) as string[];
 
   return {
@@ -184,6 +185,11 @@ export function buildEpicDrawerItem(args: {
         label: 'Split epic',
         actionUrl: `/api/repos/${encodeURIComponent(detail.repo)}/epics/${detail.epic.issue_number}/split`,
       },
+      ...detail.operator_requests.map((request) => ({
+        label: `Ack ${request.reason_code}`,
+        actionUrl: `/api/repos/${encodeURIComponent(detail.repo)}/epics/${detail.epic.issue_number}/operator-requests/${encodeURIComponent(request.reason_code)}/ack`,
+        tone: 'danger' as const,
+      })),
     ],
   };
 }

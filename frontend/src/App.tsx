@@ -1,27 +1,22 @@
 import { useEffect } from 'react';
-import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { TopNav } from './components/TopNav';
 import { KanbanBoard } from './components/KanbanBoard';
 import { CommandCenter } from './components/CommandCenter';
 import { TaskTable } from './components/TaskTable';
 import { DetailDrawer } from './components/DetailDrawer';
-import { WorkspaceNav } from './components/WorkspaceNav';
-import { WorkspacePanel } from './components/WorkspacePanel';
 import { SidebarTree } from './components/SidebarTree';
 import { SkeletonLoader } from './components/SkeletonLoader';
 import { ConfirmationModal } from './components/ConfirmationModal';
+import { OrchestratorBar } from './components/OrchestratorBar';
 import GovernanceHierarchy from './components/GovernanceHierarchy';
-import { TaskStatus } from './types';
+import { SystemPanel } from './components/SystemPanel';
 import {
   useConsoleStore,
   useFilteredWorkItems,
-  useSummaryTitle,
-  useSummarySubtitle,
   useSummaryStats,
-  useTopRepoAggregateStats,
 } from './stores/console-store';
 
-// --- Route path ↔ tab mapping ---
 const ROUTE_TAB_MAP: Record<string, string> = {
   '/kanban': 'kanban',
   '/command': 'command',
@@ -31,161 +26,87 @@ const ROUTE_TAB_MAP: Record<string, string> = {
 
 export default function App() {
   const location = useLocation();
-  const navigate = useNavigate();
-  const activeTab = (ROUTE_TAB_MAP[location.pathname] || 'kanban') as import('./types').ConsoleTabId;
-
-  // --- Store bindings ---
   const store = useConsoleStore();
   const filteredWorkItems = useFilteredWorkItems();
-  const summaryTitle = useSummaryTitle();
-  const summarySubtitle = useSummarySubtitle();
   const summaryStats = useSummaryStats();
-  const topRepoAggregateStats = useTopRepoAggregateStats();
+  const activeTab = (ROUTE_TAB_MAP[location.pathname] || 'kanban') as import('./types').ConsoleTabId;
 
-  // Initialize repos on mount
-  useEffect(() => {
-    void store.initializeRepos();
-  }, []);
-
-  // Auto-dismiss action notice
+  useEffect(() => { void store.initializeRepos(); }, []);
   useEffect(() => {
     if (!store.actionNotice) return;
     const timer = window.setTimeout(() => useConsoleStore.setState({ actionNotice: null }), 3500);
     return () => window.clearTimeout(timer);
   }, [store.actionNotice]);
-
-  // Sync tab with URL
   useEffect(() => {
     useConsoleStore.setState({ activeTab });
   }, [activeTab]);
-
-  // Clear action state when pendingAction is cleared
   useEffect(() => {
     if (!store.pendingAction) {
       useConsoleStore.setState({ actionError: null, isActionSubmitting: false });
     }
   }, [store.pendingAction]);
 
-  const workspaceItems: Array<{ id: import('./types').WorkspaceViewId; label: string }> = [
-    { id: 'epic_overview', label: 'Epic 视图' },
-    { id: 'running_jobs', label: '运行中的作业' },
-    { id: 'runtime_observability', label: '运行态观测' },
-    { id: 'task_repository', label: '任务仓库' },
-    { id: 'command_center', label: '指挥中心' },
-    { id: 'story_tree', label: '故事树' },
-    { id: 'notifications', label: '通知' },
-    { id: 'agent_console', label: '智能体控制台' },
-    { id: 'system_status', label: '系统状态' },
-  ];
-
-  const recentActionHistory = store.actionHistory.slice(0, 6);
+  const blockedCount = store.workItems.filter((i) => i.status === 'blocked').length;
+  const decisionCount = store.workItems.filter((i) => i.decisionRequired).length;
+  const runningCount = store.runningJobs.length;
 
   return (
     <div className="h-screen flex flex-col bg-background">
       <TopNav />
 
-      {/* Summary Section */}
-      <section className="border-b border-border bg-background px-6 py-4">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="space-y-1">
-            <h1 id="summary-title" className="text-xl font-semibold text-text">
-              {summaryTitle}
-            </h1>
-            <p className="text-sm text-text-secondary">
-              {summarySubtitle}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {summaryStats.map((stat) => (
-              <div
-                key={stat.label}
-                className="min-w-20 rounded-lg border border-border bg-surface px-3 py-2"
-              >
-                <div className="text-xs uppercase tracking-wide text-text-secondary">
-                  {stat.label}
-                </div>
-                <div className="text-base font-semibold text-text">
-                  {stat.value}
-                </div>
-              </div>
-            ))}
-          </div>
+      {/* Status bar */}
+      {store.repoScope === 'single' && store.workItems.length > 0 && (
+        <div className="flex items-center gap-4 border-b border-border bg-surface px-6 py-1.5 text-xs text-text-secondary">
+          {summaryStats.map((stat) => (
+            <span key={stat.label}>
+              {stat.label} <span className="font-medium text-text">{stat.value}</span>
+            </span>
+          ))}
+          {runningCount > 0 && (
+            <>
+              <span className="text-text-secondary">·</span>
+              <span className="text-blue-500">{runningCount} 运行中</span>
+            </>
+          )}
+          {blockedCount > 0 && (
+            <>
+              <span className="text-text-secondary">·</span>
+              <span className="text-red-500">{blockedCount} 阻塞</span>
+            </>
+          )}
+          {decisionCount > 0 && (
+            <>
+              <span className="text-text-secondary">·</span>
+              <span className="text-orange-500">{decisionCount} 待决策</span>
+            </>
+          )}
         </div>
+      )}
 
-        {store.repoScope === 'all' && topRepoAggregateStats.length > 0 && (
-          <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-            {topRepoAggregateStats.map((item) => (
-              <button
-                key={item.repo}
-                type="button"
-                onClick={() => store.switchToSingleRepo(item.repo)}
-                className="rounded-lg border border-border bg-surface px-3 py-2 text-left transition-colors hover:opacity-95"
-              >
-                <div className="truncate text-sm font-semibold text-text">
-                  {item.repo}
-                </div>
-                <div className="mt-1 text-xs text-text-secondary">
-                  任务 {item.totalTasks} · 活跃 {item.activeTasks} · 阻塞 {item.blockedTasks} · 关注 {item.attentionCount}
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-      </section>
+      {activeTab === 'kanban' && (
+        <OrchestratorBar
+          blockedItems={store.workItems.filter((i) => i.status === 'blocked')}
+          decisionItems={store.workItems.filter((i) => i.decisionRequired)}
+          runningJobs={store.runningJobs}
+          attentionItems={store.attentionItems}
+          onTaskClick={(id, repo) => void store.openTaskDetail(id, repo)}
+          onJobClick={(id) => void store.openJobDetail(id)}
+        />
+      )}
 
-      {/* Nav Section */}
-      <nav
-        id="app-nav"
-        aria-label="控制台导航"
-        className="border-b border-border bg-surface px-6 py-2"
-      >
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            data-nav-l1="overview"
-            data-nav-l1-toggle="overview"
-            aria-pressed={store.activeNavSection === 'overview'}
-            onClick={() => {
-              useConsoleStore.setState({ activeNavSection: 'overview', activeWorkspaceView: 'epic_overview' });
-            }}
-            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-              store.activeNavSection === 'overview'
-                ? 'bg-primary text-white'
-                : 'bg-transparent text-text-secondary hover:bg-surface-hover'
-            }`}
-          >
-            总览
-          </button>
-          <button
-            type="button"
-            data-nav-l1="detail"
-            data-nav-l1-toggle="detail"
-            aria-pressed={store.activeNavSection === 'detail'}
-            onClick={() => useConsoleStore.setState({ activeNavSection: store.selectedItem ? 'detail' : 'overview' })}
-            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-              store.activeNavSection === 'detail'
-                ? 'bg-primary text-white'
-                : 'bg-transparent text-text-secondary hover:bg-surface-hover'
-            }`}
-          >
-            详情
-          </button>
-        </div>
-      </nav>
-
-      {/* Filter Bar */}
+      {/* Filter bar — only for kanban/repository */}
       {activeTab !== 'command' && activeTab !== 'hierarchy' && (
-        <section className="border-b border-border bg-surface px-6 py-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="inline-flex rounded-md border border-border p-1">
+        <section className="border-b border-border bg-surface px-6 py-2">
+          <div className="flex items-center gap-3">
+            <div className="inline-flex rounded-md border border-border p-0.5">
               <button
                 type="button"
                 onClick={() => {
                   if (store.repoScope === 'single') return;
                   store.switchToSingleRepo(store.repo);
                 }}
-                className={`rounded px-2.5 py-1 text-xs font-medium ${
-                  store.repoScope === 'single' ? 'bg-primary text-white' : 'bg-transparent text-text-secondary'
+                className={`rounded px-2 py-1 text-xs font-medium ${
+                  store.repoScope === 'single' ? 'bg-primary text-white' : 'text-text-secondary'
                 }`}
               >
                 单仓库
@@ -197,8 +118,8 @@ export default function App() {
                   store.setRepoScope('all');
                   void store.loadAllRepos();
                 }}
-                className={`rounded px-2.5 py-1 text-xs font-medium ${
-                  store.repoScope === 'all' ? 'bg-primary text-white' : 'bg-transparent text-text-secondary'
+                className={`rounded px-2 py-1 text-xs font-medium ${
+                  store.repoScope === 'all' ? 'bg-primary text-white' : 'text-text-secondary'
                 }`}
               >
                 全仓库
@@ -207,8 +128,8 @@ export default function App() {
 
             <select
               value={store.taskStatusFilter}
-              onChange={(event) => store.setTaskStatusFilter(event.target.value as TaskStatus | 'all')}
-              className="rounded-md border border-border bg-background px-3 py-2 text-sm text-text"
+              onChange={(e) => store.setTaskStatusFilter(e.target.value as import('./types').TaskStatus | 'all')}
+              className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-text"
             >
               <option value="all">所有状态</option>
               <option value="pending">待办</option>
@@ -222,45 +143,43 @@ export default function App() {
             <input
               type="text"
               value={store.taskSearchQuery}
-              onChange={(event) => store.setTaskSearchQuery(event.target.value)}
-              placeholder="搜索仓库 / 任务标题 / 编号..."
-              className="min-w-64 flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm text-text"
+              onChange={(e) => store.setTaskSearchQuery(e.target.value)}
+              placeholder="搜索..."
+              className="min-w-48 flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-text"
             />
 
             <button
               type="button"
               onClick={() => store.clearFilters()}
               disabled={store.taskSearchQuery.length === 0 && store.taskStatusFilter === 'all'}
-              className="rounded-md border border-border bg-surface-hover px-3 py-2 text-sm text-text disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-md border border-border bg-surface-hover px-2.5 py-1.5 text-xs text-text disabled:opacity-50"
             >
-              清空筛选
+              清空
             </button>
 
-            <span className="text-sm text-text-secondary">
-              任务 {filteredWorkItems.length} / {store.workItems.length}
+            <span className="text-xs text-text-secondary">
+              {filteredWorkItems.length} / {store.workItems.length}
             </span>
           </div>
         </section>
       )}
 
       {/* Action History */}
-      {recentActionHistory.length > 0 && (
-        <section className="border-b border-border bg-surface px-6 py-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-medium text-text-secondary">
-              最近操作
-            </span>
-            {recentActionHistory.map((entry) => (
+      {store.actionHistory.length > 0 && (
+        <section className="border-b border-border bg-surface px-6 py-1.5">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-medium text-text-secondary">最近</span>
+            {store.actionHistory.slice(0, 4).map((entry) => (
               <span
                 key={entry.id}
-                className={`rounded-full px-2 py-1 text-xs ${
+                className={`rounded-full px-2 py-0.5 text-[11px] ${
                   entry.status === 'success'
-                    ? 'bg-[rgba(34,197,94,0.14)] text-[#166534] dark:text-[#86efac]'
-                    : 'bg-[rgba(239,68,68,0.14)] text-[#b91c1c] dark:text-[#fca5a5]'
+                    ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                    : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
                 }`}
                 title={`${entry.label} · ${entry.message}`}
               >
-                {entry.label} · {entry.message}
+                {entry.label}
               </span>
             ))}
           </div>
@@ -271,14 +190,10 @@ export default function App() {
       <div className="flex-1 flex overflow-hidden">
         <div className="flex-1 overflow-hidden" data-console-tab={activeTab}>
           {store.error && (
-            <div className="border-b border-red-200 bg-red-50 p-4 text-red-600">
-              {store.error}
-            </div>
+            <div className="border-b border-red-200 bg-red-50 p-3 text-sm text-red-600">{store.error}</div>
           )}
           {store.actionNotice && (
-            <div className="border-b border-emerald-200 bg-emerald-50 p-4 text-emerald-700">
-              {store.actionNotice}
-            </div>
+            <div className="border-b border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{store.actionNotice}</div>
           )}
 
           {store.loading ? (
@@ -288,154 +203,68 @@ export default function App() {
               <Route path="/kanban" element={<KanbanView />} />
               <Route path="/command" element={<CommandView />} />
               <Route path="/repository" element={<RepositoryView />} />
-              <Route path="/hierarchy" element={<HierarchyPlaceholder />} />
+              <Route path="/hierarchy" element={<GovernanceHierarchy />} />
               <Route path="/" element={<Navigate to="/kanban" replace />} />
             </Routes>
           )}
         </div>
 
-        {/* Detail Drawer */}
-        <aside
-          id="detail-drawer"
-          aria-hidden={store.selectedItem ? 'false' : 'true'}
-          hidden={!store.selectedItem}
-          className="h-full"
-        >
-          <DetailDrawer
-            item={store.selectedItem}
-            onClose={store.closeDrawer}
-            onStorySelect={(n) => void store.openStoryDetail(n)}
-            onTaskSelect={(id, repo) => void store.openTaskDetail(id, repo)}
-            onActionSelect={store.handleActionSelect}
-          />
-        </aside>
-
-        {/* Config Panel */}
-        {store.configPanel && (
-          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 px-4">
-            <div className="w-full max-w-lg rounded-xl border border-border bg-surface p-5">
-              <div className="mb-2 text-lg font-semibold text-text">
-                {store.configPanel === 'model' ? '模型配置' : '系统配置'}
-              </div>
-              <div className="mb-4 text-sm text-text-secondary">
-                {store.configPanel === 'model'
-                  ? '模型配置入口已恢复，下一步可接入真实模型参数与提供商设置。'
-                  : '系统配置入口已恢复，下一步可接入真实控制台级别设置。'}
-              </div>
-              <div className="rounded-lg border border-border bg-surface-hover px-4 py-3 text-sm text-text">
-                {store.configPanel === 'model'
-                  ? `当前主题：${store.currentTheme}。此面板当前提供入口恢复与结构占位。`
-                  : '该面板当前提供入口恢复与结构占位。'}
-              </div>
-              <div className="mt-4 flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => store.setConfigPanel(null)}
-                  className="rounded-md border border-border bg-surface-hover px-3 py-2 text-sm text-text"
-                >
-                  关闭
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <ConfirmationModal />
-      </div>
-    </div>
-  );
-}
-
-// --- Route sub-views ---
-
-function KanbanView() {
-  const store = useConsoleStore();
-  const filteredWorkItems = useFilteredWorkItems();
-  const workspaceItems: Array<{ id: import('./types').WorkspaceViewId; label: string }> = [
-    { id: 'epic_overview', label: 'Epic 视图' },
-    { id: 'running_jobs', label: '运行中的作业' },
-    { id: 'runtime_observability', label: '运行态观测' },
-    { id: 'task_repository', label: '任务仓库' },
-    { id: 'command_center', label: '指挥中心' },
-    { id: 'story_tree', label: '故事树' },
-    { id: 'notifications', label: '通知' },
-    { id: 'agent_console', label: '智能体控制台' },
-    { id: 'system_status', label: '系统状态' },
-  ];
-
-  return (
-    <section className="h-full">
-      <div className="flex h-full overflow-hidden">
-        <div className="flex h-full">
-          <button
-            id="sidebar-toggle-btn"
-            type="button"
-            aria-expanded={store.sidebarCollapsed ? 'false' : 'true'}
-            onClick={() => store.toggleSidebar()}
-            className="m-4 h-10 rounded-md border border-border bg-surface px-3 py-2 text-sm text-text"
-          >
-            {store.sidebarCollapsed ? '显示侧边栏' : '隐藏侧边栏'}
-          </button>
+        {/* Sidebar Tree */}
+        {activeTab === 'kanban' && (
           <SidebarTree
             rows={store.epicTreeRows}
             collapsed={store.sidebarCollapsed}
             onTaskSelect={(id) => void store.openTaskDetail(id)}
           />
-          {!store.sidebarCollapsed && (
-            <WorkspaceNav
-              items={workspaceItems}
-              activeView={store.activeWorkspaceView}
-              onSelect={(view) => useConsoleStore.setState({ activeWorkspaceView: view })}
-            />
-          )}
-        </div>
+        )}
 
-        <div className="flex-1 min-w-0">
-          <KanbanBoard
-            epicRows={store.epicRows}
-            onOpenEpicDetail={(n) => void store.openEpicDetail(n)}
-            hidden={store.activeWorkspaceView !== 'epic_overview'}
-          />
-        </div>
+        {/* Detail Drawer */}
+        <DetailDrawer
+          item={store.selectedItem}
+          onClose={store.closeDrawer}
+          onStorySelect={(n) => void store.openStoryDetail(n)}
+          onTaskSelect={(id) => void store.openTaskDetail(id)}
+          onActionSelect={store.handleActionSelect}
+        />
 
-        <div
-          hidden={store.activeWorkspaceView === 'epic_overview'}
-          className="w-[420px] shrink-0 border-l border-border min-w-0"
-        >
-          <WorkspacePanel
-            activeView={store.activeWorkspaceView}
-            jobs={store.runningJobs}
-            runtimeObservations={store.runtimeObservations}
-            tasks={filteredWorkItems}
-            notifications={store.notifications}
-            failedNotifications={store.failedNotifications}
-            agents={store.agents}
-            agentStats={store.agentStats}
-            attentionItems={store.attentionItems}
-            epicRows={store.epicRows}
-            epicTreeRows={store.epicTreeRows}
-            repoSummary={store.repoSummary}
-            onJobClick={(id) => void store.openJobDetail(id)}
-            onEpicClick={(n) => void store.openEpicDetail(n)}
-            onStoryClick={(n) => void store.openStoryDetail(n)}
-            onTaskClick={(id, repo) => void store.openTaskDetail(id, repo)}
-          />
-        </div>
+        <ConfirmationModal />
+        <SystemPanel
+          mode={store.configPanel}
+          systemStatus={store.systemStatus}
+          onClose={() => store.setConfigPanel(null)}
+        />
       </div>
-    </section>
+    </div>
+  );
+}
+
+function KanbanView() {
+  const store = useConsoleStore();
+  return (
+    <KanbanBoard
+      epicRows={store.epicRows}
+      repo={store.repo}
+      systemStatus={store.systemStatus}
+      onOpenSystemPanel={() => store.setConfigPanel('system')}
+      onOpenEpicDetail={(n) => void store.openEpicDetail(n)}
+    />
   );
 }
 
 function CommandView() {
   const store = useConsoleStore();
   return (
-    <section className="h-full">
-      <CommandCenter
-        attentionItems={store.attentionItems}
-        commandHistory={store.commandHistory}
-        onSendCommand={store.handleSendCommand}
-      />
-    </section>
+    <CommandCenter
+      intents={store.intents}
+      selectedIntentId={store.selectedIntentId}
+      isSubmitting={store.isIntakeSubmitting}
+      systemStatus={store.systemStatus}
+      onSendCommand={store.handleSendCommand}
+      onSelectIntent={store.selectIntent}
+      onApproveSelectedIntent={store.approveSelectedIntent}
+      onRejectSelectedIntent={(reason) => void store.rejectSelectedIntent(reason)}
+      onReviseSelectedIntent={(feedback) => void store.reviseSelectedIntent(feedback)}
+    />
   );
 }
 
@@ -443,18 +272,10 @@ function RepositoryView() {
   const store = useConsoleStore();
   const filteredWorkItems = useFilteredWorkItems();
   return (
-    <section className="h-full">
-      <TaskTable
-        items={filteredWorkItems}
-        totalCount={store.workItems.length}
-        onRowClick={store.openCardDetail}
-      />
-    </section>
-  );
-}
-
-function HierarchyView() {
-  return (
-    <GovernanceHierarchy />
+    <TaskTable
+      items={filteredWorkItems}
+      totalCount={store.workItems.length}
+      onRowClick={store.openCardDetail}
+    />
   );
 }

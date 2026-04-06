@@ -65,6 +65,103 @@ export interface RepositoriesResponse {
   }>;
 }
 
+export interface SystemStatusResponse {
+  config_source: string;
+  postgres_dsn_configured: boolean;
+  database_connected: boolean;
+  database_error?: string;
+  configured_repos: Array<{
+    repo: string;
+    workdir: string;
+    log_dir: string;
+    workdir_exists: boolean;
+    log_dir_exists: boolean;
+  }>;
+  discovered_repositories: string[];
+  commands: Record<string, {
+    available: boolean;
+    path?: string | null;
+  }>;
+  dev_compose_file: string;
+  dev_env_file: string;
+  recommended_actions: string[];
+}
+
+export interface IntentsResponse {
+  repo: string;
+  items: Array<{
+    id: string;
+    repo: string;
+    prompt: string;
+    status: string;
+    summary?: string;
+    clarification_questions_json?: string[];
+    proposal_json?: {
+      epic?: Record<string, unknown>;
+      stories?: Array<{
+        story_key?: string;
+        title: string;
+        lane?: string;
+        complexity?: string;
+        depends_on_story_keys?: string[];
+        tasks?: Array<{
+          task_key?: string;
+          title: string;
+          lane?: string;
+          wave?: string;
+          task_type?: string;
+          blocking_mode?: string;
+          planned_paths?: string[];
+          dod?: string[];
+          verification?: string[];
+        }>;
+      }>;
+    };
+    promoted_epic_issue_number?: number | null;
+    approved_by?: string | null;
+    reviewed_at?: string | null;
+    reviewed_by?: string | null;
+    review_action?: string | null;
+    review_feedback?: string | null;
+  }>;
+  count: number;
+}
+
+export interface IntakeMutationResponse {
+  intent_id: string;
+  repo: string;
+  status: string;
+  summary?: string;
+  questions?: string[];
+  proposal?: {
+    epic?: Record<string, unknown>;
+    stories?: Array<{
+      story_key?: string;
+      title: string;
+      lane?: string;
+      complexity?: string;
+      depends_on_story_keys?: string[];
+      tasks?: Array<{
+        task_key?: string;
+        title: string;
+        lane?: string;
+        wave?: string;
+        task_type?: string;
+        blocking_mode?: string;
+        planned_paths?: string[];
+        dod?: string[];
+        verification?: string[];
+      }>;
+    }>;
+  };
+  promoted_epic_issue_number?: number | null;
+  approved_by?: string | null;
+  reviewed_at?: string | null;
+  reviewed_by?: string | null;
+  review_action?: string | null;
+  review_feedback?: string | null;
+}
+
 export interface RepoSummaryResponse {
   repo: string;
   total_epics?: number;
@@ -230,6 +327,18 @@ export interface EpicDetailResponse {
     command?: string;
     log_path?: string;
     started_at?: string;
+  }>;
+  operator_requests: Array<{
+    repo?: string;
+    epic_issue_number?: number;
+    reason_code: string;
+    summary: string;
+    remaining_story_issue_numbers_json?: number[];
+    blocked_story_issue_numbers_json?: number[];
+    status?: string;
+    opened_at?: string;
+    closed_at?: string | null;
+    closed_reason?: string | null;
   }>;
 }
 
@@ -491,6 +600,77 @@ export async function getWorkItems(repo: string, status?: string): Promise<WorkI
 
 export async function getRepositories(): Promise<RepositoriesResponse> {
   return fetchJson<RepositoriesResponse>('/api/repos');
+}
+
+export async function getSystemStatus(): Promise<SystemStatusResponse> {
+  return fetchJson<SystemStatusResponse>('/api/system/status');
+}
+
+export async function getIntents(repo: string): Promise<IntentsResponse> {
+  return fetchJson<IntentsResponse>(`/api/repos/${encodeURIComponent(repo)}/intents`);
+}
+
+export async function submitIntent(repo: string, prompt: string): Promise<IntakeMutationResponse> {
+  return fetchJson<IntakeMutationResponse>(`/api/repos/${encodeURIComponent(repo)}/intents`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ prompt }),
+  });
+}
+
+export async function answerIntent(intentId: string, answer: string): Promise<IntakeMutationResponse> {
+  return fetchJson<IntakeMutationResponse>(`/api/intents/${encodeURIComponent(intentId)}/answer`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ answer }),
+  });
+}
+
+export async function approveIntent(intentId: string, approver: string): Promise<IntakeMutationResponse> {
+  return fetchJson<IntakeMutationResponse>(`/api/intents/${encodeURIComponent(intentId)}/approve`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ approver }),
+  });
+}
+
+export async function rejectIntent(
+  intentId: string,
+  reviewer: string,
+  reason: string,
+): Promise<IntakeMutationResponse> {
+  return fetchJson<IntakeMutationResponse>(`/api/intents/${encodeURIComponent(intentId)}/reject`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ reviewer, reason }),
+  });
+}
+
+export async function reviseIntent(
+  intentId: string,
+  reviewer: string,
+  feedback: string,
+): Promise<IntakeMutationResponse> {
+  return fetchJson<IntakeMutationResponse>(`/api/intents/${encodeURIComponent(intentId)}/revise`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ reviewer, feedback }),
+  });
 }
 
 export async function getRepoSummary(repo: string): Promise<RepoSummaryResponse> {

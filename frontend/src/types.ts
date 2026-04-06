@@ -8,19 +8,6 @@ export type IssueKind = 'epic' | 'story' | 'task' | 'unknown';
 
 export type ConsoleTabId = 'kanban' | 'command' | 'repository' | 'hierarchy';
 
-export type ConsoleNavSection = 'overview' | 'detail';
-
-export type WorkspaceViewId =
-  | 'epic_overview'
-  | 'running_jobs'
-  | 'runtime_observability'
-  | 'task_repository'
-  | 'command_center'
-  | 'story_tree'
-  | 'notifications'
-  | 'agent_console'
-  | 'system_status';
-
 export interface EpicOverviewRow {
   epic_issue_number: number;
   title: string;
@@ -206,6 +193,18 @@ export interface EpicDetailResponse {
     command?: string;
     log_path?: string;
     started_at?: string;
+  }>;
+  operator_requests: Array<{
+    repo?: string;
+    epic_issue_number?: number;
+    reason_code: string;
+    summary: string;
+    remaining_story_issue_numbers_json?: number[];
+    blocked_story_issue_numbers_json?: number[];
+    status?: string;
+    opened_at?: string;
+    closed_at?: string | null;
+    closed_reason?: string | null;
   }>;
 }
 
@@ -424,6 +423,78 @@ export interface RepoSummary {
   completedTasks: number;
   blockedTasks: number;
   snapshotHealth?: RepoSnapshotHealth;
+}
+
+export interface SystemCommandStatus {
+  available: boolean;
+  path?: string | null;
+}
+
+export interface SystemRepoMapping {
+  repo: string;
+  workdir: string;
+  log_dir: string;
+  workdir_exists: boolean;
+  log_dir_exists: boolean;
+}
+
+export interface SystemStatus {
+  config_source: string;
+  postgres_dsn_configured: boolean;
+  database_connected: boolean;
+  database_error?: string;
+  configured_repos: SystemRepoMapping[];
+  discovered_repositories: string[];
+  commands: Record<string, SystemCommandStatus>;
+  dev_compose_file: string;
+  dev_env_file: string;
+  recommended_actions: string[];
+}
+
+export type IntakeIntentStatus =
+  | 'awaiting_clarification'
+  | 'awaiting_review'
+  | 'promoted'
+  | 'rejected';
+
+export interface IntakeProposalTask {
+  task_key?: string;
+  title: string;
+  lane?: string;
+  wave?: string;
+  task_type?: string;
+  blocking_mode?: string;
+  planned_paths?: string[];
+  dod?: string[];
+  verification?: string[];
+}
+
+export interface IntakeProposalStory {
+  story_key?: string;
+  title: string;
+  lane?: string;
+  complexity?: string;
+  depends_on_story_keys?: string[];
+  tasks?: IntakeProposalTask[];
+}
+
+export interface IntakeIntent {
+  id: string;
+  repo: string;
+  prompt: string;
+  status: IntakeIntentStatus;
+  summary: string;
+  questions: string[];
+  proposal: {
+    epic?: Record<string, unknown>;
+    stories?: IntakeProposalStory[];
+  };
+  promotedEpicIssueNumber?: number | null;
+  approvedBy?: string | null;
+  reviewedAt?: string | null;
+  reviewedBy?: string | null;
+  reviewAction?: 'approve' | 'reject' | 'revise' | null;
+  reviewFeedback?: string | null;
 }
 
 export interface CommandMessage {
