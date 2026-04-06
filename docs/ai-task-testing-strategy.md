@@ -14,6 +14,10 @@ The goal is to test whether the orchestration system can:
 
 This document describes how to test that stack in this repository.
 
+For the architectural boundary between Taskplane's verifier-backed fact substrate and downstream evaluation products, see:
+
+- `docs/eval-boundary.md`
+
 ---
 
 ## Core principle
@@ -70,16 +74,23 @@ In this repository, that includes testing:
 - repository-owned attempt finalization
 - task and story GitHub writeback
 - commit / PR linkage recording
+- natural-language intake review / promotion transitions
 
 Current examples:
 
 - `tests/test_worker.py`
 - `tests/test_repository.py`
 - `tests/test_story_runner.py`
+- `tests/test_intake_workflow.py`
+- `tests/test_hierarchy_api_actions.py`
 
 What this layer answers:
 
 > Given a classified executor outcome, does the orchestration control plane do the right thing?
+
+For intake-specific review flows, the question becomes:
+
+> Can the system persist, expose, and replay proposal review decisions without blurring proposal truth and canonical truth?
 
 This is the most important layer in the project.
 

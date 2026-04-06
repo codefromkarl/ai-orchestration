@@ -1,6 +1,6 @@
 # Taskplane Architecture Overview
 
-> 最后更新：2026-04-01
+> 最后更新：2026-04-06
 
 本文档描述**当前仓库实现**的总体架构，用来回答三个问题：
 
@@ -130,7 +130,27 @@ GitHub Issues
 
 两者共享同一个 PostgreSQL 控制面，但职责不同。
 
-### 3.2 Supervisor -> Story -> Worker
+### 3.2 自然语言 intake -> review -> promotion
+
+```text
+Operator / Console / CLI
+  -> hierarchy_api / intake_cli
+  -> natural_language_intent
+  -> answer / approve / reject / revise
+  -> promoted_epic_issue_number
+  -> program_epic / program_story / work_item
+```
+
+这一段把自然语言入口拆成两层事实：
+
+- proposal / review 事实：`natural_language_intent`
+- canonical promotion 事实：`program_epic`、`program_story`、`work_item`
+
+当前实现里，CLI 只提供 submit / answer / approve；`reject` / `revise` 由控制台 / API 入口完成，review metadata 会持续写回 `natural_language_intent`，不会直接改写执行真相。
+
+控制台还提供 operator request ack；repository / scheduler 边界也已经拆成更窄的协议，例如 `ReadyStateSyncRepository` 和 `SupervisorSchedulingRepository`，用来把就绪态同步和调度读写分离。
+
+### 3.3 Supervisor -> Story -> Worker
 
 ```mermaid
 sequenceDiagram
@@ -296,6 +316,13 @@ sequenceDiagram
 
 职责：补充 artifact 引用、事件日志、失败移入 DLQ、多 agent 运行记录和通知通道。
 
+### 6.7 提案与审核边界
+
+- `story_task_draft`
+- `natural_language_intent`
+
+职责：分别承载 intake 生成的 task 草案与自然语言 proposal / review 记录。它们属于控制面边缘事实，不是 worker 直接消费的运行态真相；只有显式 review 通过后，promotion 才会进入 `program_epic / program_story / work_item`。
+
 ## 7. 当前最值得记住的架构结论
 
 ### 7.1 PostgreSQL 是编排真相源
@@ -321,6 +348,10 @@ GitHub 不是状态机真相。GitHub 更像：
 ### 7.4 UI 是控制面读模型，不是独立业务后端
 
 FastAPI / React 主要消费控制面表和查询 SQL，本质上是 operator console，而不是另一套业务核心。
+
+### 7.5 自然语言提案是控制面事实，不是执行真相
+
+`natural_language_intent` 记录 prompt、proposal、clarification 和 review metadata。review 决策必须是结构化事实，而不是停留在前端临时状态或文本备注里。
 
 ## 8. 推荐阅读顺序
 

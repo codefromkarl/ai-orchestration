@@ -15,6 +15,10 @@ For engineering enforcement boundaries (what must be rigid vs what should remain
 
 - `docs/adr/0001-engineering-boundaries.md`
 
+For the boundary between Taskplane's runtime fact kernel and any downstream EvalOps/reporting platform, see:
+
+- `docs/eval-boundary.md`
+
 ---
 
 ## What the substrate is
@@ -243,6 +247,30 @@ Code-level seam:
 
 - `IntakeAdapter`
 
+### Natural-language intake review adapter
+
+Prompt → proposal → explicit review → canonical promotion.
+
+Today’s implementation:
+
+- CLI handles submit / answer / approve
+- console / API handle approve / reject / revise review actions
+- `natural_language_intent` stores proposal, clarification, and review metadata
+- `story_task_draft` stores the task draft records produced during promotion
+
+Generalized contract:
+
+- accept a natural-language prompt
+- produce a proposal that stays separate from canonical truth
+- record explicit review decisions before promotion
+- promote into canonical entities only through a durable boundary
+
+Code-level seams:
+
+- `NaturalLanguageIntakeService`
+- `natural_language_intent`
+- `story_task_draft`
+
 ### Executor adapter
 
 `WorkItem` → `ExecutionResult`
@@ -324,6 +352,7 @@ These should be documented as replaceable specializations:
 
 - GitHub issue import and normalization
 - Stardrifter issue/body conventions
+- natural-language intake and review policy
 - epic/story governance semantics
 - story decomposition workflow
 - NocoDB observer views

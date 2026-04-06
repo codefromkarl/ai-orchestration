@@ -4,6 +4,10 @@ For the engineering boundary policy that defines which layers must be strictly e
 
 - `docs/adr/0001-engineering-boundaries.md`
 
+For the specific boundary between Taskplane's authoritative runtime facts and a separate downstream EvalOps layer, see:
+
+- `docs/eval-boundary.md`
+
 ## Purpose
 
 This document defines how the PostgreSQL-backed task orchestrator should guarantee execution correctness, prevent false completion, and systematically verify completed work.
@@ -458,6 +462,8 @@ For these tasks:
 - a human decision later transitions the task to `done` or `failed`
 
 Approval decisions must be recorded as structured events.
+
+The same rule applies one layer earlier for natural-language intake proposals: `natural_language_intent` persists `approved_at`, `approved_by`, `reviewed_at`, `reviewed_by`, `review_action`, and `review_feedback` so review decisions remain auditable before promotion into canonical tasks.
 
 ---
 

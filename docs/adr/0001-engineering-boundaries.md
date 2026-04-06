@@ -76,6 +76,8 @@ The system must distinguish between:
 
 Each promotion boundary must be durable and auditable.
 
+Natural-language intake proposals follow the same rule: review metadata stays in `natural_language_intent`, and promotion into canonical entities must be explicit rather than implied by UI state, comments, or downstream side effects.
+
 #### 6. Approval state
 
 Approval must be represented as an explicit state (`awaiting_approval`) and explicit events (`approval_event`). It must never be represented only as a generic blocked state or implied by PR review status.
@@ -129,4 +131,5 @@ Reason codes and structured state are strict. Their human-facing presentation in
 
 - `docs/substrate-architecture.md`
 - `docs/task-orchestrator-correctness-and-verification-design.md`
+- `docs/eval-boundary.md`
 - `docs/mvp-design.md`
