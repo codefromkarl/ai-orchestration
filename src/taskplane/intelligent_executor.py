@@ -16,6 +16,20 @@ from urllib import request as urllib_request
 import psycopg
 from psycopg.rows import dict_row
 
+from .model_gateway import ModelTurn, ToolInvocation, ToolModelClient
+from .model_gateway.errors import LLMRequestError
+from .model_gateway.factory import build_model_client as _build_model_client
+from .model_gateway.providers.anthropic import AnthropicModelClient
+from .model_gateway.providers.base import coerce_json_object as _coerce_json_object
+from .model_gateway.providers.openai import OpenAIModelClient
+from .model_gateway.settings import (
+    DEFAULT_EXECUTOR_MODEL,
+    DEFAULT_VERIFIER_MODEL,
+    ExecutorModelSettings,
+    load_executor_model_settings_from_env,
+    _env_int,
+    _env_float,
+)
 from .models import ExecutionContext, VerificationEvidence, WorkItem
 from .worker import ExecutionResult
 
@@ -23,20 +37,6 @@ TERMINAL_OUTCOMES = {"done", "already_satisfied", "blocked", "needs_decision"}
 DEFAULT_EXECUTOR_MODEL = "gpt-4.1-mini"
 DEFAULT_VERIFIER_MODEL = "gpt-4.1-mini"
 MARKDOWN_SECTION_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
-
-
-@dataclass(frozen=True)
-class ToolInvocation:
-    call_id: str
-    name: str
-    arguments: dict[str, Any]
-
-
-@dataclass(frozen=True)
-class ModelTurn:
-    text: str
-    tool_calls: tuple[ToolInvocation, ...]
-    assistant_message: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -55,30 +55,19 @@ class IntelligentExecutorConfig:
 
     @classmethod
     def from_env(cls) -> IntelligentExecutorConfig:
+        s = load_executor_model_settings_from_env()
         return cls(
-            provider=(os.environ.get("TASKPLANE_LLM_PROVIDER") or "openai")
-            .strip()
-            .lower(),
-            model=(
-                os.environ.get("TASKPLANE_LLM_EXECUTOR_MODEL")
-                or os.environ.get("TASKPLANE_LLM_MODEL")
-                or DEFAULT_EXECUTOR_MODEL
-            ).strip(),
-            max_turns=_env_int("TASKPLANE_LLM_EXECUTOR_MAX_TURNS", 18),
-            max_output_tokens=_env_int(
-                "TASKPLANE_LLM_EXECUTOR_MAX_OUTPUT_TOKENS", 1400
-            ),
-            timeout_seconds=_env_int("TASKPLANE_LLM_TIMEOUT_SECONDS", 60),
-            max_retries=_env_int("TASKPLANE_LLM_EXECUTOR_MAX_RETRIES", 2),
-            retry_backoff_seconds=_env_float(
-                "TASKPLANE_LLM_EXECUTOR_RETRY_BACKOFF_SECONDS", 1.5
-            ),
-            context_chars=_env_int("TASKPLANE_LLM_CONTEXT_MAX_CHARS", 16000),
-            context_window_chars=_env_int(
-                "TASKPLANE_LLM_CONTEXT_WINDOW_CHARS", 30000
-            ),
-            keep_recent_messages=_env_int("TASKPLANE_LLM_KEEP_RECENT_MESSAGES", 8),
-            tool_loop_hard_limit=_env_int("TASKPLANE_LLM_TOOL_LOOP_LIMIT", 4),
+            provider=s.provider,
+            model=s.executor_model,
+            max_turns=s.max_turns,
+            max_output_tokens=s.executor_max_output_tokens,
+            timeout_seconds=s.timeout_seconds,
+            max_retries=s.max_retries,
+            retry_backoff_seconds=s.retry_backoff_seconds,
+            context_chars=s.context_max_chars,
+            context_window_chars=s.context_window_chars,
+            keep_recent_messages=s.keep_recent_messages,
+            tool_loop_hard_limit=s.tool_loop_hard_limit,
         )
 
 
@@ -93,58 +82,15 @@ class IntelligentVerifierConfig:
 
     @classmethod
     def from_env(cls) -> IntelligentVerifierConfig:
+        s = load_executor_model_settings_from_env()
         return cls(
-            provider=(os.environ.get("TASKPLANE_LLM_PROVIDER") or "openai")
-            .strip()
-            .lower(),
-            model=(
-                os.environ.get("TASKPLANE_LLM_VERIFIER_MODEL")
-                or os.environ.get("TASKPLANE_LLM_MODEL")
-                or DEFAULT_VERIFIER_MODEL
-            ).strip(),
-            timeout_seconds=_env_int("TASKPLANE_LLM_TIMEOUT_SECONDS", 60),
-            max_output_tokens=_env_int(
-                "TASKPLANE_LLM_VERIFIER_MAX_OUTPUT_TOKENS", 1200
-            ),
-            context_chars=_env_int("TASKPLANE_LLM_CONTEXT_MAX_CHARS", 16000),
+            provider=s.provider,
+            model=s.verifier_model,
+            timeout_seconds=s.timeout_seconds,
+            max_output_tokens=s.verifier_max_output_tokens,
+            context_chars=s.context_max_chars,
             diff_chars=_env_int("TASKPLANE_LLM_VERIFIER_DIFF_CHARS", 8000),
         )
-
-
-class LLMRequestError(RuntimeError):
-    def __init__(
-        self,
-        message: str,
-        *,
-        status_code: int | None = None,
-        reason_code: str = "upstream_api_error",
-        retryable: bool = False,
-    ) -> None:
-        super().__init__(message)
-        self.status_code = status_code
-        self.reason_code = reason_code
-        self.retryable = retryable
-
-
-class ToolModelClient(Protocol):
-    def complete_with_tools(
-        self,
-        *,
-        model: str,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
-        timeout_seconds: int,
-        max_output_tokens: int,
-    ) -> ModelTurn: ...
-
-    def complete_text(
-        self,
-        *,
-        model: str,
-        messages: list[dict[str, Any]],
-        timeout_seconds: int,
-        max_output_tokens: int,
-    ) -> str: ...
 
 
 class TaskContextEngine:
@@ -612,226 +558,6 @@ class WorkspaceToolbox:
         if path != self.workspace_path and self.workspace_path not in path.parents:
             raise ValueError(f"path escapes workspace: {raw_path}")
         return path
-
-
-class OpenAIModelClient:
-    def __init__(self) -> None:
-        self.base_url = (
-            os.environ.get("TASKPLANE_OPENAI_BASE_URL")
-            or os.environ.get("OPENAI_BASE_URL")
-            or "https://api.openai.com/v1"
-        ).rstrip("/")
-        self.api_key = (
-            os.environ.get("TASKPLANE_OPENAI_API_KEY")
-            or os.environ.get("OPENAI_API_KEY")
-            or ""
-        ).strip()
-
-    def complete_with_tools(
-        self,
-        *,
-        model: str,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
-        timeout_seconds: int,
-        max_output_tokens: int,
-    ) -> ModelTurn:
-        payload = {
-            "model": model,
-            "messages": messages,
-            "tools": tools,
-            "tool_choice": "auto",
-            "temperature": 0.1,
-            "max_tokens": max_output_tokens,
-        }
-        data = self._post_json(
-            "/chat/completions",
-            payload=payload,
-            timeout_seconds=timeout_seconds,
-        )
-        choice = (data.get("choices") or [{}])[0]
-        message = choice.get("message") or {}
-        content = str(message.get("content") or "")
-        tool_calls_raw = message.get("tool_calls") or []
-        invocations: list[ToolInvocation] = []
-        for index, call in enumerate(tool_calls_raw):
-            function_payload = call.get("function") or {}
-            name = str(function_payload.get("name") or "")
-            call_id = str(call.get("id") or f"tool_call_{index}")
-            arguments = _coerce_json_object(function_payload.get("arguments"))
-            invocations.append(
-                ToolInvocation(call_id=call_id, name=name, arguments=arguments)
-            )
-        assistant_message: dict[str, Any] = {
-            "role": "assistant",
-            "content": content,
-        }
-        if tool_calls_raw:
-            assistant_message["tool_calls"] = tool_calls_raw
-        return ModelTurn(
-            text=content,
-            tool_calls=tuple(invocations),
-            assistant_message=assistant_message,
-        )
-
-    def complete_text(
-        self,
-        *,
-        model: str,
-        messages: list[dict[str, Any]],
-        timeout_seconds: int,
-        max_output_tokens: int,
-    ) -> str:
-        payload = {
-            "model": model,
-            "messages": messages,
-            "temperature": 0,
-            "max_tokens": max_output_tokens,
-        }
-        data = self._post_json(
-            "/chat/completions",
-            payload=payload,
-            timeout_seconds=timeout_seconds,
-        )
-        choice = (data.get("choices") or [{}])[0]
-        message = choice.get("message") or {}
-        return str(message.get("content") or "").strip()
-
-    def _post_json(
-        self,
-        path: str,
-        *,
-        payload: dict[str, Any],
-        timeout_seconds: int,
-    ) -> dict[str, Any]:
-        if not self.api_key:
-            raise LLMRequestError(
-                "OPENAI_API_KEY is required for LLM executor",
-                reason_code="credential_required",
-                retryable=False,
-            )
-        return _http_post_json(
-            url=f"{self.base_url}{path}",
-            payload=payload,
-            headers={"Authorization": f"Bearer {self.api_key}"},
-            timeout_seconds=timeout_seconds,
-        )
-
-
-class AnthropicModelClient:
-    def __init__(self) -> None:
-        self.base_url = (
-            os.environ.get("TASKPLANE_ANTHROPIC_BASE_URL")
-            or os.environ.get("ANTHROPIC_BASE_URL")
-            or "https://api.anthropic.com/v1"
-        ).rstrip("/")
-        self.api_key = (
-            os.environ.get("TASKPLANE_ANTHROPIC_API_KEY")
-            or os.environ.get("ANTHROPIC_API_KEY")
-            or ""
-        ).strip()
-
-    def complete_with_tools(
-        self,
-        *,
-        model: str,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
-        timeout_seconds: int,
-        max_output_tokens: int,
-    ) -> ModelTurn:
-        system_prompt, anthropic_messages = _convert_messages_for_anthropic(messages)
-        payload = {
-            "model": model,
-            "system": system_prompt,
-            "messages": anthropic_messages,
-            "tools": _convert_tools_for_anthropic(tools),
-            "max_tokens": max_output_tokens,
-            "temperature": 0.1,
-        }
-        data = self._post_json(payload=payload, timeout_seconds=timeout_seconds)
-        blocks = data.get("content") or []
-        text_parts: list[str] = []
-        invocations: list[ToolInvocation] = []
-        assistant_tool_calls: list[dict[str, Any]] = []
-        for index, block in enumerate(blocks):
-            block_type = str(block.get("type") or "")
-            if block_type == "text":
-                text_parts.append(str(block.get("text") or ""))
-                continue
-            if block_type != "tool_use":
-                continue
-            name = str(block.get("name") or "")
-            call_id = str(block.get("id") or f"tool_call_{index}")
-            arguments = (
-                block.get("input") if isinstance(block.get("input"), dict) else {}
-            )
-            invocations.append(
-                ToolInvocation(call_id=call_id, name=name, arguments=arguments)
-            )
-            assistant_tool_calls.append(
-                {
-                    "id": call_id,
-                    "type": "function",
-                    "function": {
-                        "name": name,
-                        "arguments": json.dumps(arguments, ensure_ascii=False),
-                    },
-                }
-            )
-        text = "\n".join(part for part in text_parts if part).strip()
-        assistant_message: dict[str, Any] = {"role": "assistant", "content": text}
-        if assistant_tool_calls:
-            assistant_message["tool_calls"] = assistant_tool_calls
-        return ModelTurn(
-            text=text,
-            tool_calls=tuple(invocations),
-            assistant_message=assistant_message,
-        )
-
-    def complete_text(
-        self,
-        *,
-        model: str,
-        messages: list[dict[str, Any]],
-        timeout_seconds: int,
-        max_output_tokens: int,
-    ) -> str:
-        system_prompt, anthropic_messages = _convert_messages_for_anthropic(messages)
-        payload = {
-            "model": model,
-            "system": system_prompt,
-            "messages": anthropic_messages,
-            "max_tokens": max_output_tokens,
-            "temperature": 0,
-        }
-        data = self._post_json(payload=payload, timeout_seconds=timeout_seconds)
-        blocks = data.get("content") or []
-        text_parts = [
-            str(block.get("text") or "")
-            for block in blocks
-            if block.get("type") == "text"
-        ]
-        return "\n".join(part for part in text_parts if part).strip()
-
-    def _post_json(
-        self, *, payload: dict[str, Any], timeout_seconds: int
-    ) -> dict[str, Any]:
-        if not self.api_key:
-            raise LLMRequestError(
-                "ANTHROPIC_API_KEY is required for LLM executor",
-                reason_code="credential_required",
-                retryable=False,
-            )
-        return _http_post_json(
-            url=f"{self.base_url}/messages",
-            payload=payload,
-            headers={
-                "x-api-key": self.api_key,
-                "anthropic-version": "2023-06-01",
-            },
-            timeout_seconds=timeout_seconds,
-        )
 
 
 class IntelligentExecutor:
@@ -1474,72 +1200,6 @@ def _extract_markdown_section(body: str, headings: set[str]) -> str:
     return ""
 
 
-def _http_post_json(
-    *,
-    url: str,
-    payload: dict[str, Any],
-    headers: dict[str, str],
-    timeout_seconds: int,
-) -> dict[str, Any]:
-    request = urllib_request.Request(
-        url,
-        data=_json_dump(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            **headers,
-        },
-        method="POST",
-    )
-    try:
-        with urllib_request.urlopen(request, timeout=timeout_seconds) as response:
-            body = response.read().decode("utf-8")
-    except urllib_error.HTTPError as exc:
-        raw = exc.read().decode("utf-8", errors="replace")
-        reason_code, retryable = _classify_http_error(exc.code)
-        raise LLMRequestError(
-            _trim_text(f"LLM API HTTP {exc.code}: {raw}", 900),
-            status_code=exc.code,
-            reason_code=reason_code,
-            retryable=retryable,
-        ) from exc
-    except urllib_error.URLError as exc:
-        raise LLMRequestError(
-            f"LLM API network error: {exc}",
-            reason_code="resource_temporarily_unavailable",
-            retryable=True,
-        ) from exc
-    except TimeoutError as exc:
-        raise LLMRequestError(
-            f"LLM API timeout: {exc}",
-            reason_code="timeout",
-            retryable=True,
-        ) from exc
-
-    try:
-        data = json.loads(body)
-    except json.JSONDecodeError as exc:
-        raise LLMRequestError(
-            f"LLM API returned invalid JSON: {_trim_text(body, 400)}",
-            reason_code="invalid-result-payload",
-            retryable=False,
-        ) from exc
-    if not isinstance(data, dict):
-        raise LLMRequestError(
-            "LLM API returned non-object response",
-            reason_code="invalid-result-payload",
-            retryable=False,
-        )
-    return data
-
-
-def _classify_http_error(status_code: int) -> tuple[str, bool]:
-    if status_code in {401, 403}:
-        return "credential_required", False
-    if status_code in {408, 429, 500, 502, 503, 504}:
-        return "upstream_api_error", True
-    return "upstream_api_error", False
-
-
 def _extract_terminal_payload(raw_text: str) -> dict[str, Any] | None:
     raw = raw_text.strip()
     candidate = _coerce_json_object(raw)
@@ -1575,23 +1235,6 @@ def _normalize_terminal_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def _coerce_json_object(raw: Any) -> dict[str, Any]:
-    if isinstance(raw, dict):
-        return raw
-    if not isinstance(raw, str):
-        return {}
-    text = raw.strip()
-    if not text:
-        return {}
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        return {}
-    if isinstance(parsed, dict):
-        return parsed
-    return {}
-
-
 def _json_dump(payload: Any) -> str:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
@@ -1625,13 +1268,6 @@ def _compact_journal(journal: list[str]) -> str:
     return "\n".join([*head, f"... {omitted} steps omitted ...", *tail])
 
 
-def _build_model_client(provider: str) -> ToolModelClient:
-    normalized = provider.strip().lower()
-    if normalized == "anthropic":
-        return AnthropicModelClient()
-    return OpenAIModelClient()
-
-
 def _safe_git_diff_name_only(workspace_path: Path) -> list[str]:
     completed = subprocess.run(
         ["git", "-C", str(workspace_path), "diff", "--name-only"],
@@ -1647,77 +1283,6 @@ def _safe_git_diff_name_only(workspace_path: Path) -> list[str]:
         if normalized and normalized not in paths:
             paths.append(normalized)
     return paths[:30]
-
-
-def _convert_messages_for_anthropic(
-    messages: list[dict[str, Any]],
-) -> tuple[str, list[dict[str, Any]]]:
-    system_parts: list[str] = []
-    result: list[dict[str, Any]] = []
-    for message in messages:
-        role = str(message.get("role") or "")
-        content = message.get("content")
-        if role == "system":
-            if isinstance(content, str) and content.strip():
-                system_parts.append(content)
-            continue
-        if role == "tool":
-            result.append(
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": str(message.get("tool_call_id") or ""),
-                            "content": str(content or ""),
-                        }
-                    ],
-                }
-            )
-            continue
-        if role == "assistant":
-            blocks: list[dict[str, Any]] = []
-            if isinstance(content, str) and content:
-                blocks.append({"type": "text", "text": content})
-            for call in message.get("tool_calls") or []:
-                function_payload = call.get("function") or {}
-                arguments = _coerce_json_object(function_payload.get("arguments"))
-                blocks.append(
-                    {
-                        "type": "tool_use",
-                        "id": str(call.get("id") or ""),
-                        "name": str(function_payload.get("name") or ""),
-                        "input": arguments,
-                    }
-                )
-            if not blocks:
-                blocks.append({"type": "text", "text": ""})
-            result.append({"role": "assistant", "content": blocks})
-            continue
-
-        text_content = str(content or "")
-        result.append(
-            {
-                "role": "user" if role != "assistant" else "assistant",
-                "content": [{"type": "text", "text": text_content}],
-            }
-        )
-    return "\n\n".join(system_parts), result
-
-
-def _convert_tools_for_anthropic(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    converted: list[dict[str, Any]] = []
-    for tool in tools:
-        function_payload = tool.get("function") or {}
-        converted.append(
-            {
-                "name": str(function_payload.get("name") or ""),
-                "description": str(function_payload.get("description") or ""),
-                "input_schema": function_payload.get("parameters")
-                or {"type": "object", "properties": {}},
-            }
-        )
-    return converted
 
 
 def _is_truthy(raw: str | None) -> bool:

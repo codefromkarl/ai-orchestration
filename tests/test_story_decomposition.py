@@ -8,7 +8,7 @@ from taskplane.story_decomposition import (
     run_story_decomposition,
     run_shell_story_decomposer,
 )
-from taskplane.contextweaver_indexing import (
+from taskplane.contextatlas_indexing import (
     FileIndexRegistry,
     IndexArtifactRecord,
 )
@@ -816,13 +816,13 @@ def test_run_story_decomposition_allows_doc_only_tasks_for_documentation_story()
     assert captured["execution_status"] == "active"
 
 
-def test_run_shell_story_decomposer_blocks_when_contextweaver_index_fails(
+def test_run_shell_story_decomposer_blocks_when_contextatlas_index_fails(
     monkeypatch, tmp_path
 ):
     gateway_calls: list[object] = []
     monkeypatch.setattr(
         story_decomposition_module,
-        "ensure_contextweaver_index_for_checkout",
+        "ensure_contextatlas_index_for_checkout",
         lambda project_dir, explicit_repo=None: (
             gateway_calls.append((project_dir, explicit_repo)) or "index failed"
         ),
@@ -841,8 +841,8 @@ def test_run_shell_story_decomposer_blocks_when_contextweaver_index_fails(
 
     assert result.success is False
     assert result.outcome == "blocked"
-    assert result.reason_code == "contextweaver-index-failed"
-    assert "contextweaver index failed" in result.summary
+    assert result.reason_code == "contextatlas-index-failed"
+    assert "contextatlas index failed" in result.summary
     assert gateway_calls == [(tmp_path.resolve(), "codefromkarl/stardrifter")]
 
 
@@ -859,7 +859,7 @@ def test_run_shell_story_decomposer_indexes_before_running_decomposer(
 
     monkeypatch.setattr(
         story_decomposition_module,
-        "ensure_contextweaver_index_for_checkout",
+        "ensure_contextatlas_index_for_checkout",
         lambda project_dir, explicit_repo=None: (
             events.append(("index", project_dir, explicit_repo)) or None
         ),
@@ -920,10 +920,10 @@ def test_run_shell_story_decomposer_reuses_ready_index_for_same_repo_snapshot(
             self.stdout = stdout
             self.stderr = stderr
 
-    monkeypatch.setenv("TASKPLANE_CONTEXTWEAVER_REGISTRY_PATH", str(registry_path))
+    monkeypatch.setenv("TASKPLANE_CONTEXTATLAS_REGISTRY_PATH", str(registry_path))
     monkeypatch.setattr(
         story_decomposition_module,
-        "ensure_contextweaver_index_for_checkout",
+        "ensure_contextatlas_index_for_checkout",
         lambda project_dir, explicit_repo=None: None,
     )
 
@@ -969,7 +969,7 @@ def test_run_shell_story_decomposer_blocks_when_opencode_times_out(
 
     monkeypatch.setattr(
         story_decomposition_module,
-        "ensure_contextweaver_index_for_checkout",
+        "ensure_contextatlas_index_for_checkout",
         lambda project_dir, explicit_repo=None: None,
     )
 
@@ -1007,7 +1007,7 @@ def test_run_shell_story_decomposer_blocks_when_payload_is_missing_on_success(
             self.stderr = stderr
 
     def fake_run(command, *args, **kwargs):
-        if command[:2] == ["contextweaver", "index"]:
+        if command[:2] == ["contextatlas", "index"]:
             return Completed(returncode=0, stdout="indexed")
         return Completed(returncode=0, stdout="not json")
 
@@ -1040,7 +1040,7 @@ def test_run_shell_story_decomposer_preserves_partial_output_on_timeout(
 
     monkeypatch.setattr(
         story_decomposition_module,
-        "ensure_contextweaver_index_for_checkout",
+        "ensure_contextatlas_index_for_checkout",
         lambda project_dir, explicit_repo=None: None,
     )
 
@@ -1086,7 +1086,7 @@ def test_run_shell_story_decomposer_blocks_when_outcome_is_unsupported(
             self.stderr = stderr
 
     def fake_run(command, *args, **kwargs):
-        if command[:2] == ["contextweaver", "index"]:
+        if command[:2] == ["contextatlas", "index"]:
             return Completed(returncode=0, stdout="indexed")
         return Completed(
             returncode=0,

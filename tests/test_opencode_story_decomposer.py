@@ -10,9 +10,9 @@ from taskplane.opencode_story_decomposer import (
     _extract_result_payload,
     _render_task_issue_body,
 )
-from taskplane.contextweaver_indexing import (
+from taskplane.contextatlas_indexing import (
     RepositoryIdentity,
-    ensure_contextweaver_index_for_checkout,
+    ensure_contextatlas_index_for_checkout,
 )
 
 
@@ -30,6 +30,7 @@ def test_build_prompt_requires_task_creation_or_refinement():
 
     assert "2-4 个“当前阶段最小可执行”的 Task 方案" in prompt
     assert "不要创建 GitHub issue" in prompt
+    assert "不要先做广泛探索，不要等待额外上下文" in prompt
     assert "needs_story_refinement" in prompt
     assert "不得返回 decomposed" in prompt
     assert "不得只创建 DOC task" in prompt
@@ -150,7 +151,7 @@ def test_create_task_issues_from_payload_creates_pending_lane_task(
     assert drafts[0].title == "[01-IMPL] 补全 canonical geometry authored 数据入库"
 
 
-def test_ensure_contextweaver_index_runs_index_command(monkeypatch, tmp_path):
+def test_ensure_contextatlas_index_runs_index_command(monkeypatch, tmp_path):
     captured: dict[str, Any] = {}
 
     class Completed:
@@ -166,22 +167,22 @@ def test_ensure_contextweaver_index_runs_index_command(monkeypatch, tmp_path):
     monkeypatch.setattr("subprocess.run", fake_run)
 
     monkeypatch.setenv(
-        "TASKPLANE_CONTEXTWEAVER_REGISTRY_PATH",
+        "TASKPLANE_CONTEXTATLAS_REGISTRY_PATH",
         str(tmp_path / "registry.json"),
     )
 
-    result = ensure_contextweaver_index_for_checkout(tmp_path, explicit_repo="repo")
+    result = ensure_contextatlas_index_for_checkout(tmp_path, explicit_repo="repo")
 
     assert result is None
-    assert captured["command"] == ["contextweaver", "index", str(tmp_path)]
+    assert captured["command"] == ["contextatlas", "index", str(tmp_path)]
     assert captured["cwd"] == str(tmp_path)
 
 
-def test_ensure_contextweaver_index_returns_error_when_indexing_fails(
+def test_ensure_contextatlas_index_returns_error_when_indexing_fails(
     monkeypatch, tmp_path
 ):
     monkeypatch.setattr(
-        "taskplane.contextweaver_indexing.resolve_repository_identity",
+        "taskplane.contextatlas_indexing.resolve_repository_identity",
         lambda project_dir, explicit_repo=None: RepositoryIdentity(
             project_dir=project_dir.resolve(),
             repo_root=project_dir.resolve(),
@@ -192,16 +193,16 @@ def test_ensure_contextweaver_index_returns_error_when_indexing_fails(
         ),
     )
     monkeypatch.setattr(
-        "taskplane.contextweaver_indexing._run_contextweaver_index",
+        "taskplane.contextatlas_indexing._run_contextatlas_index",
         lambda project_dir: "boom",
     )
 
     monkeypatch.setenv(
-        "TASKPLANE_CONTEXTWEAVER_REGISTRY_PATH",
+        "TASKPLANE_CONTEXTATLAS_REGISTRY_PATH",
         str(tmp_path / "registry.json"),
     )
 
-    result = ensure_contextweaver_index_for_checkout(tmp_path, explicit_repo="repo")
+    result = ensure_contextatlas_index_for_checkout(tmp_path, explicit_repo="repo")
 
     assert result == "boom"
 
@@ -304,6 +305,11 @@ def test_build_prompt_forbids_deferred_answers():
         project_dir=Path("/repo/root"),
     )
 
-    assert "你可以输出两种 JSON" in prompt
-    assert 'execution_kind":"checkpoint"' in prompt
-    assert 'execution_kind":"wait"' in prompt
+    assert (
+        "不允许 checkpoint、wait、retry_intent、后台探索、等待子结果或稍后继续"
+        in prompt
+    )
+    assert "不要先做广泛探索，不要等待额外上下文" in prompt
+    assert "你必须在本次响应中直接输出一个终态 JSON" in prompt
+    assert 'execution_kind":"checkpoint"' not in prompt
+    assert 'execution_kind":"wait"' not in prompt

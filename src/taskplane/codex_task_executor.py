@@ -10,8 +10,29 @@ from typing import Any, cast
 import psycopg
 from psycopg.rows import dict_row
 
-from .contextweaver_indexing import ensure_contextweaver_index_for_checkout
+from .contextatlas_indexing import ensure_contextatlas_index_for_checkout
 from .execution_protocol import classify_execution_payload
+from .model_gateway.normalization import (
+    build_timeout_payload as _build_timeout_payload,
+    classify_nonzero_exit_payload as _classify_nonzero_exit_payload,
+    is_non_terminal_payload as _is_non_terminal_payload,
+    normalize_payload as _normalize_payload,
+)
+from .model_gateway.providers.cli_codex import (
+    build_codex_exec_command as _build_codex_exec_command,
+    classify_missing_codex_payload as _classify_missing_codex_payload,
+    classify_nonzero_codex_payload as _classify_nonzero_codex_payload,
+    extract_codex_payload as _extract_codex_payload,
+)
+from .model_gateway.settings import (
+    DEFAULT_CODEX_MODEL,
+    CodexSettings,
+    load_codex_settings_from_env,
+)
+from .model_gateway.settings import (
+    DEFAULT_CODEX_MODEL,
+    load_codex_settings_from_env,
+)
 from .opencode_task_executor import (
     ALREADY_SATISFIED_OUTCOME,
     INVALID_RESULT_PAYLOAD_EXIT_CODE,
@@ -22,32 +43,24 @@ from .opencode_task_executor import (
     TIMEOUT_EXIT_CODE,
     _build_prompt,
     _build_resume_context_from_output,
-    _build_timeout_payload,
     _capture_worktree_snapshot,
-    _classify_nonzero_exit_payload,
     _compute_changed_paths,
     _emit_execution_result,
     _emit_intermediate_payload,
     _emit_phase,
     _extract_allowed_paths,
-    _is_non_terminal_payload,
     _list_dirty_paths,
     _load_hard_cap_seconds,
-    _normalize_payload,
     _resolve_git_root,
     _run_monitored_subprocess,
     _summarize_partial_output,
 )
 
-DEFAULT_CODEX_MODEL = "gpt-5.4-mini"
-
 
 def main() -> int:
     work_id = os.environ.get("TASKPLANE_WORK_ID", "").strip()
     dsn = os.environ.get("TASKPLANE_DSN", "").strip()
-    project_dir = Path(
-        os.environ.get("TASKPLANE_PROJECT_DIR") or Path.cwd()
-    ).resolve()
+    project_dir = Path(os.environ.get("TASKPLANE_PROJECT_DIR") or Path.cwd()).resolve()
     resume_context = os.environ.get("TASKPLANE_RESUME_CONTEXT", "").strip()
     if not work_id:
         raise SystemExit("TASKPLANE_WORK_ID is required")
@@ -108,16 +121,16 @@ def run_controlled_codex_task(
         )
         return NO_REPO_CHANGE_EXIT_CODE
 
-    index_error = ensure_contextweaver_index_for_checkout(
+    index_error = ensure_contextatlas_index_for_checkout(
         project_dir,
         explicit_repo="codefromkarl/stardrifter",
     )
-    _emit_phase("contextweaver_index", ok=index_error is None, detail=index_error or "")
+    _emit_phase("contextatlas_index", ok=index_error is None, detail=index_error or "")
     if index_error is not None:
         payload = {
             "outcome": "blocked",
-            "reason_code": "contextweaver-index-failed",
-            "summary": f"contextweaver index failed: {index_error}",
+            "reason_code": "contextatlas-index-failed",
+            "summary": f"contextatlas index failed: {index_error}",
             "decision_required": False,
         }
         _emit_execution_result(payload)
@@ -167,6 +180,7 @@ def run_controlled_codex_task(
                 partial_output=_summarize_partial_output(
                     (completed.stdout or "") + (completed.stderr or "")
                 ),
+                tool_name="codex",
             )
             _emit_execution_result(payload)
             print(payload["summary"], file=sys.stderr)
@@ -273,154 +287,11 @@ def run_controlled_codex_task(
 
 
 def _load_timeout_seconds() -> int:
-    raw = os.environ.get("TASKPLANE_CODEX_TIMEOUT_SECONDS", "").strip()
-    if not raw:
-        return 1200
-    try:
-        value = int(raw)
-    except ValueError as exc:
-        raise SystemExit("TASKPLANE_CODEX_TIMEOUT_SECONDS must be an integer") from exc
-    if value <= 0:
-        raise SystemExit("TASKPLANE_CODEX_TIMEOUT_SECONDS must be positive")
-    return value
+    return load_codex_settings_from_env().timeout_seconds
 
 
 def _load_codex_model() -> str:
-    return (
-        os.environ.get("TASKPLANE_CODEX_MODEL")
-        or os.environ.get("TASKPLANE_LLM_EXECUTOR_MODEL")
-        or DEFAULT_CODEX_MODEL
-    ).strip()
-
-
-def _build_codex_exec_command(
-    *,
-    focus_dir: Path,
-    prompt: str,
-    output_last_message_path: Path,
-) -> list[str]:
-    return [
-        "codex",
-        "exec",
-        "--json",
-        "--sandbox",
-        "danger-full-access",
-        "--skip-git-repo-check",
-        "--ephemeral",
-        "--model",
-        _load_codex_model(),
-        "--output-last-message",
-        str(output_last_message_path),
-        "-C",
-        str(focus_dir),
-        prompt,
-    ]
-
-
-def _extract_codex_payload(
-    *,
-    raw_stream: str,
-    output_last_message_path: Path,
-) -> dict[str, Any] | None:
-    payload = _extract_json_payload_from_file(output_last_message_path)
-    if payload is not None:
-        return payload
-
-    for line in raw_stream.splitlines():
-        stripped = line.strip()
-        if not stripped.startswith("{"):
-            continue
-        try:
-            event = json.loads(stripped)
-        except json.JSONDecodeError:
-            continue
-        candidate = _extract_json_payload_from_codex_event(event)
-        if candidate is not None:
-            return candidate
-    return None
-
-
-def _extract_json_payload_from_file(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    content = path.read_text(encoding="utf-8").strip()
-    if not content:
-        return None
-    try:
-        payload = json.loads(content)
-    except json.JSONDecodeError:
-        return None
-    return payload if isinstance(payload, dict) else None
-
-
-def _extract_json_payload_from_codex_event(event: Any) -> dict[str, Any] | None:
-    if not isinstance(event, dict):
-        return None
-    if event.get("type") != "item.completed":
-        return None
-    item = event.get("item")
-    if not isinstance(item, dict):
-        return None
-    if item.get("type") != "agent_message":
-        return None
-    text = str(item.get("text") or "").strip()
-    if not text.startswith("{"):
-        return None
-    try:
-        payload = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-    return payload if isinstance(payload, dict) else None
-
-
-def _classify_missing_codex_payload(raw_stream: str) -> dict[str, Any]:
-    saw_event_stream = False
-    for line in raw_stream.splitlines():
-        stripped = line.strip()
-        if not stripped.startswith("{"):
-            continue
-        try:
-            parsed = json.loads(stripped)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(parsed, dict):
-            continue
-        event_type = str(parsed.get("type") or "").strip().lower()
-        if event_type in {
-            "thread.started",
-            "turn.started",
-            "turn.completed",
-            "item.completed",
-        }:
-            saw_event_stream = True
-            continue
-    summary = (
-        "codex emitted event stream but did not emit a terminal structured result payload"
-        if saw_event_stream
-        else "codex did not emit a valid structured result payload"
-    )
-    return {
-        "outcome": "blocked",
-        "reason_code": "missing-terminal-payload",
-        "summary": summary,
-        "decision_required": False,
-    }
-
-
-def _classify_nonzero_codex_payload(
-    *, raw_stream: str, returncode: int
-) -> dict[str, Any]:
-    lowered = raw_stream.lower()
-    if "usage limit" in lowered or "get more access now" in lowered:
-        return {
-            "outcome": "blocked",
-            "reason_code": "upstream_api_error",
-            "summary": "codex failed due to upstream usage limit before producing a terminal payload",
-            "decision_required": False,
-        }
-    payload = _classify_nonzero_exit_payload(returncode=returncode)
-    payload["summary"] = f"codex exited with code {returncode}"
-    return payload
+    return load_codex_settings_from_env().model
 
 
 def _select_codex_focus_dir(*, project_dir: Path, issue_body: str) -> Path:

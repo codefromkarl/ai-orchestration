@@ -10,7 +10,7 @@ import time
 from typing import Any, Callable
 
 from .fallback_templates import default_fallback_payload_for_story
-from .contextweaver_indexing import ensure_contextweaver_index_for_checkout
+from .contextatlas_indexing import ensure_contextatlas_index_for_checkout
 
 from .github_sync import fetch_issues_via_gh, persist_issue_import_batch
 from .governance_sync import (
@@ -327,7 +327,7 @@ def run_shell_story_decomposer(
             summary="TASKPLANE_DECOMPOSER_COMMAND is required",
             reason_code="missing-decomposer-command",
         )
-    index_error = ensure_contextweaver_index_for_checkout(
+    index_error = ensure_contextatlas_index_for_checkout(
         project_dir,
         explicit_repo=repo,
     )
@@ -335,8 +335,8 @@ def run_shell_story_decomposer(
         return DecompositionExecutionResult(
             success=False,
             outcome="blocked",
-            summary=f"contextweaver index failed: {index_error}",
-            reason_code="contextweaver-index-failed",
+            summary=f"contextatlas index failed: {index_error}",
+            reason_code="contextatlas-index-failed",
         )
     env = os.environ.copy()
     env.update(

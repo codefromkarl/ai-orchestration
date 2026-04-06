@@ -11,7 +11,7 @@ from typing import Any, cast
 import psycopg
 from psycopg.rows import dict_row
 
-from .contextweaver_indexing import ensure_contextweaver_index_for_checkout
+from .contextatlas_indexing import ensure_contextatlas_index_for_checkout
 from .story_decomposition import DECOMPOSITION_RESULT_MARKER
 
 
@@ -64,15 +64,15 @@ def main() -> int:
     if row is None:
         raise SystemExit(f"epic not found: {epic_issue_number}")
 
-    index_error = ensure_contextweaver_index_for_checkout(
+    index_error = ensure_contextatlas_index_for_checkout(
         project_dir,
         explicit_repo=repo,
     )
     if index_error is not None:
         payload = {
             "outcome": "blocked",
-            "summary": f"contextweaver index failed: {index_error}",
-            "reason_code": "contextweaver-index-failed",
+            "summary": f"contextatlas index failed: {index_error}",
+            "reason_code": "contextatlas-index-failed",
         }
         print(f"{DECOMPOSITION_RESULT_MARKER}{json.dumps(payload, ensure_ascii=False)}")
         return 1

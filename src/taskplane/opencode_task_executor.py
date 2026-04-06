@@ -23,7 +23,27 @@ from .execution_protocol import (
     EXECUTION_WAIT_MARKER,
     classify_execution_payload,
 )
-from .contextweaver_indexing import ensure_contextweaver_index_for_checkout
+from .contextatlas_indexing import ensure_contextatlas_index_for_checkout
+from .model_gateway.normalization import (
+    build_timeout_payload as _build_timeout_payload_base,
+    classify_nonzero_exit_payload as _classify_nonzero_exit_payload,
+    is_non_terminal_payload as _is_non_terminal_payload,
+    normalize_payload as _normalize_payload,
+)
+from .model_gateway.providers import cli_opencode as _cli_opencode
+from .model_gateway.settings import (
+    load_opencode_settings_from_env,
+    OpenCodeSettings,
+)
+from .model_gateway.providers.cli_opencode import (
+    build_opencode_run_command as _build_opencode_run_command,
+    build_salvaged_done_payload as _build_salvaged_done_payload,
+    classify_malformed_stream_payload as _classify_malformed_stream_payload,
+    classify_missing_terminal_payload as _classify_missing_terminal_payload,
+    classify_multiple_terminal_payload as _classify_multiple_terminal_payload,
+    classify_upstream_api_error_payload as _classify_upstream_api_error_payload,
+    extract_wait_hint as _extract_wait_hint,
+)
 
 NO_REPO_CHANGE_EXIT_CODE = 3
 INVALID_RESULT_PAYLOAD_EXIT_CODE = 4
@@ -31,19 +51,6 @@ NEEDS_DECISION_EXIT_CODE = 5
 TIMEOUT_EXIT_CODE = 124
 ALREADY_SATISFIED_OUTCOME = "already_satisfied"
 TERMINAL_OUTCOMES = {"done", "blocked", "needs_decision", ALREADY_SATISFIED_OUTCOME}
-NON_TERMINAL_REASON_CODES = {
-    "awaiting_background_context",
-    "awaiting_background_research",
-    "waiting_for_context_gathering",
-    "research_in_progress",
-    "context_gathering_in_progress",
-}
-PAUSED_REASON_CODES = {
-    "awaiting_user_input",
-    "ask_next_step",
-    "awaiting_next_step",
-    "paused_for_input",
-}
 PROGRESS_SIGNAL_KINDS = {"checkpoint", "wait", "retry_intent"}
 
 
@@ -68,12 +75,76 @@ class ResultPayloadExtraction:
     observed_event_types: tuple[str, ...] = ()
 
 
+def _extract_result_payload(raw_stream: str) -> dict | None:
+    return _cli_opencode.extract_result_payload(
+        raw_stream, extraction_cls=ResultPayloadExtraction
+    )
+
+
+def _extract_result_payload_details(raw_stream: str) -> ResultPayloadExtraction:
+    return _cli_opencode.extract_result_payload_details(
+        raw_stream, extraction_cls=ResultPayloadExtraction
+    )
+
+
+def _build_opencode_run_command(*, focus_dir: Path, prompt: str) -> list[str]:
+    s = load_opencode_settings_from_env()
+    return _cli_opencode.build_opencode_run_command(
+        focus_dir=focus_dir, prompt=prompt, settings=s
+    )
+
+
+def _classify_multiple_terminal_payload(
+    details: ResultPayloadExtraction,
+) -> dict | None:
+    return _cli_opencode.classify_multiple_terminal_payload(details)
+
+
+def _classify_malformed_stream_payload(raw_stream: str) -> dict | None:
+    return _cli_opencode.classify_malformed_stream_payload(raw_stream)
+
+
+def _classify_missing_terminal_payload(raw_stream: str) -> dict | None:
+    return _cli_opencode.classify_missing_terminal_payload(raw_stream)
+
+
+def _classify_upstream_api_error_payload(raw_stream: str) -> dict | None:
+    return _cli_opencode.classify_upstream_api_error_payload(raw_stream)
+
+
+def _extract_wait_hint(raw_stream: str) -> dict | None:
+    return _cli_opencode.extract_wait_hint(raw_stream)
+
+
+def _build_salvaged_done_payload(*, changed_paths: list[str]) -> dict[str, Any] | None:
+    return _cli_opencode.build_salvaged_done_payload(changed_paths=changed_paths)
+
+
+def _build_timeout_payload(
+    *,
+    timeout_seconds: int,
+    hard_cap_seconds: int | None = None,
+    timeout_kind: str | None = None,
+    partial_output: str = "",
+    tool_name: str = "opencode",
+    resume_context_builder: Any = None,
+) -> dict[str, Any]:
+    if resume_context_builder is None:
+        resume_context_builder = _build_resume_context_from_output
+    return _build_timeout_payload_base(
+        timeout_seconds=timeout_seconds,
+        hard_cap_seconds=hard_cap_seconds,
+        timeout_kind=timeout_kind,
+        partial_output=partial_output,
+        tool_name=tool_name,
+        resume_context_builder=resume_context_builder,
+    )
+
+
 def main() -> int:
     work_id = os.environ.get("TASKPLANE_WORK_ID", "").strip()
     dsn = os.environ.get("TASKPLANE_DSN", "").strip()
-    project_dir = Path(
-        os.environ.get("TASKPLANE_PROJECT_DIR") or Path.cwd()
-    ).resolve()
+    project_dir = Path(os.environ.get("TASKPLANE_PROJECT_DIR") or Path.cwd()).resolve()
     resume_context = os.environ.get("TASKPLANE_RESUME_CONTEXT", "").strip()
     if not work_id:
         raise SystemExit("TASKPLANE_WORK_ID is required")
@@ -139,16 +210,16 @@ def run_controlled_opencode_task(
             file=sys.stderr,
         )
         return NO_REPO_CHANGE_EXIT_CODE
-    index_error = ensure_contextweaver_index_for_checkout(
+    index_error = ensure_contextatlas_index_for_checkout(
         project_dir,
         explicit_repo="codefromkarl/stardrifter",
     )
-    _emit_phase("contextweaver_index", ok=index_error is None, detail=index_error or "")
+    _emit_phase("contextatlas_index", ok=index_error is None, detail=index_error or "")
     if index_error is not None:
         payload = {
             "outcome": "blocked",
-            "reason_code": "contextweaver-index-failed",
-            "summary": f"contextweaver index failed: {index_error}",
+            "reason_code": "contextatlas-index-failed",
+            "summary": f"contextatlas index failed: {index_error}",
             "decision_required": False,
         }
         _emit_execution_result(payload)
@@ -190,6 +261,8 @@ def run_controlled_opencode_task(
             partial_output=_summarize_partial_output(
                 (completed.stdout or "") + (completed.stderr or "")
             ),
+            tool_name="opencode",
+            resume_context_builder=_build_resume_context_from_output,
         )
         _emit_execution_result(payload)
         print(payload["summary"], file=sys.stderr)
@@ -232,7 +305,9 @@ def run_controlled_opencode_task(
                     file=sys.stderr,
                 )
                 return INVALID_RESULT_PAYLOAD_EXIT_CODE
-            upstream_api_error_payload = _classify_upstream_api_error_payload(raw_stream)
+            upstream_api_error_payload = _classify_upstream_api_error_payload(
+                raw_stream
+            )
             if upstream_api_error_payload is not None:
                 _emit_execution_result(upstream_api_error_payload)
                 print(upstream_api_error_payload["summary"], file=sys.stderr)
@@ -406,25 +481,6 @@ def _normalize_dod_json(raw_dod_json: Any) -> dict[str, Any]:
     return {}
 
 
-def _build_opencode_run_command(*, focus_dir: Path, prompt: str) -> list[str]:
-    command = [
-        "opencode",
-        "run",
-        "--format",
-        "json",
-        "--dir",
-        str(focus_dir),
-    ]
-    configured_model = os.environ.get("TASKPLANE_OPENCODE_MODEL", "").strip()
-    if configured_model:
-        command.extend(["--model", configured_model])
-    configured_variant = os.environ.get("TASKPLANE_OPENCODE_VARIANT", "").strip()
-    if configured_variant:
-        command.extend(["--variant", configured_variant])
-    command.append(prompt)
-    return command
-
-
 def _extract_markdown_section(body: str, headings: set[str]) -> str:
     pattern = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
     matches = list(pattern.finditer(body or ""))
@@ -472,38 +528,16 @@ def _select_opencode_focus_dir(*, project_dir: Path, issue_body: str) -> Path:
 
 
 def _load_timeout_seconds(*, bounded_mode: bool = False) -> int:
-    raw = os.environ.get("TASKPLANE_OPENCODE_TIMEOUT_SECONDS", "").strip()
-    if not raw:
-        return 300 if bounded_mode else 1200
-    try:
-        value = int(raw)
-    except ValueError as exc:
-        raise SystemExit(
-            "TASKPLANE_OPENCODE_TIMEOUT_SECONDS must be an integer"
-        ) from exc
-    if value <= 0:
-        raise SystemExit("TASKPLANE_OPENCODE_TIMEOUT_SECONDS must be positive")
-    return value
+    s = load_opencode_settings_from_env(bounded_mode=bounded_mode)
+    return s.timeout_seconds
 
 
 def _load_hard_cap_seconds(*, timeout_seconds: int, bounded_mode: bool) -> int:
-    raw = os.environ.get("TASKPLANE_OPENCODE_HARD_CAP_SECONDS", "").strip()
-    if not raw:
-        multiplier = 3 if bounded_mode else 1
-        return max(timeout_seconds, timeout_seconds * multiplier)
-    try:
-        value = int(raw)
-    except ValueError as exc:
-        raise SystemExit(
-            "TASKPLANE_OPENCODE_HARD_CAP_SECONDS must be an integer"
-        ) from exc
-    if value <= 0:
-        raise SystemExit("TASKPLANE_OPENCODE_HARD_CAP_SECONDS must be positive")
-    if value < timeout_seconds:
-        raise SystemExit(
-            "TASKPLANE_OPENCODE_HARD_CAP_SECONDS must be >= TASKPLANE_OPENCODE_TIMEOUT_SECONDS"
-        )
-    return value
+    s = load_opencode_settings_from_env(bounded_mode=bounded_mode)
+    if s.hard_cap_seconds is not None:
+        return s.hard_cap_seconds
+    multiplier = 3 if bounded_mode else 1
+    return max(timeout_seconds, timeout_seconds * multiplier)
 
 
 def _is_bounded_mode_enabled() -> bool:
@@ -594,257 +628,6 @@ def _list_dirty_paths(repo_root: Path) -> set[str]:
     return dirty_paths
 
 
-def _extract_result_payload(raw_stream: str) -> dict | None:
-    return _extract_result_payload_details(raw_stream).payload
-
-
-def _extract_result_payload_details(raw_stream: str) -> ResultPayloadExtraction:
-    candidates: list[tuple[str, bool]] = []
-    observed_event_types: list[str] = []
-    for line in raw_stream.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if stripped.startswith(EXECUTION_RESULT_MARKER):
-            candidates.append(
-                (stripped[len(EXECUTION_RESULT_MARKER) :].strip(), True)
-            )
-            continue
-        if not stripped.startswith("{") or not stripped.endswith("}"):
-            continue
-        candidates.append((stripped, False))
-        try:
-            event = json.loads(stripped)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(event, dict):
-            event_type = str(event.get("type") or "").strip()
-            if event_type and event_type not in observed_event_types:
-                observed_event_types.append(event_type)
-        text_candidate = _extract_json_from_text_event(event)
-        if text_candidate:
-            candidates.append((text_candidate, False))
-
-    terminal_payloads: list[dict] = []
-    marker_terminal_payloads: list[dict] = []
-    distinct_terminal_payloads: set[str] = set()
-    payload: dict | None = None
-    marker_payload: dict | None = None
-    for candidate, from_marker in candidates:
-        try:
-            parsed = json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict) and "outcome" in parsed:
-            terminal_payloads.append(parsed)
-            distinct_terminal_payloads.add(
-                json.dumps(parsed, sort_keys=True, ensure_ascii=False)
-            )
-            payload = parsed
-            if from_marker:
-                marker_terminal_payloads.append(parsed)
-                marker_payload = parsed
-    if marker_payload is not None:
-        payload = marker_payload
-
-    return ResultPayloadExtraction(
-        payload=payload,
-        terminal_payload_count=len(terminal_payloads),
-        distinct_terminal_payload_count=len(distinct_terminal_payloads),
-        marker_terminal_payload_count=len(marker_terminal_payloads),
-        observed_event_types=tuple(observed_event_types),
-    )
-
-
-def _classify_multiple_terminal_payload(details: ResultPayloadExtraction) -> dict | None:
-    if details.distinct_terminal_payload_count <= 1:
-        return None
-    return {
-        "outcome": "blocked",
-        "reason_code": "multiple-terminal-payloads",
-        "summary": "opencode emitted conflicting terminal payloads in a single run",
-        "decision_required": False,
-        "terminal_payload_count": details.terminal_payload_count,
-        "distinct_terminal_payload_count": details.distinct_terminal_payload_count,
-        "marker_terminal_payload_count": details.marker_terminal_payload_count,
-        "observed_event_types": list(details.observed_event_types),
-    }
-
-
-def _classify_malformed_stream_payload(raw_stream: str) -> dict | None:
-    lowered = raw_stream.lower()
-    markers = (
-        "json parsing failed",
-        "json parse error",
-        "json decode error",
-        "failed to parse json",
-        "unexpected end of json input",
-        "unexpected end-of-input",
-        "unterminated string",
-        "expecting value",
-        "expecting ',' delimiter",
-        "extra data",
-        "unexpected non-whitespace character after json",
-        "unexpected identifier",
-        "expected '}'",
-        "expected '}\"",
-    )
-    if not any(marker in lowered for marker in markers):
-        return None
-    return {
-        "outcome": "blocked",
-        "reason_code": "interrupted_retryable",
-        "summary": "opencode emitted malformed JSON event/output; treating as retryable stream corruption",
-        "decision_required": False,
-    }
-
-
-def _classify_missing_terminal_payload(raw_stream: str) -> dict | None:
-    saw_event_stream = False
-    for line in raw_stream.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            parsed = json.loads(stripped)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(parsed, dict):
-            continue
-        event_type = str(parsed.get("type") or "").strip().lower()
-        if not event_type:
-            continue
-        if event_type in {
-            "text",
-            "error",
-            "step_start",
-            "step_finish",
-            "tool_use",
-            "tool_result",
-            "assistant",
-            "message_start",
-            "message_stop",
-            "content_block_start",
-            "content_block_stop",
-            "content_block_delta",
-        }:
-            saw_event_stream = True
-            continue
-        if event_type.startswith("step_") or event_type.startswith("tool_"):
-            saw_event_stream = True
-    if not saw_event_stream:
-        return None
-    return {
-        "outcome": "blocked",
-        "reason_code": "missing-terminal-payload",
-        "summary": "opencode emitted event stream but did not emit a terminal structured result payload",
-        "decision_required": False,
-    }
-
-
-def _classify_upstream_api_error_payload(raw_stream: str) -> dict | None:
-    upstream_markers = (
-        "apierror",
-        "insufficient quota",
-        "insufficient_quota",
-        "quota exceeded",
-        "credit balance",
-        "payment required",
-        "rate limit",
-        "too many requests",
-        "api key",
-        "authentication",
-        "auth failed",
-        "套餐已经到期",
-        "额度用完",
-        "充值",
-    )
-    for line in raw_stream.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            parsed = json.loads(stripped)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(parsed, dict):
-            continue
-        if str(parsed.get("type") or "").strip().lower() != "error":
-            continue
-        error = parsed.get("error")
-        if not isinstance(error, dict):
-            continue
-        fragments: list[str] = []
-        name = str(error.get("name") or "").strip()
-        if name:
-            fragments.append(name)
-        top_level_message = error.get("message")
-        if isinstance(top_level_message, str) and top_level_message.strip():
-            fragments.append(top_level_message.strip())
-        data = error.get("data")
-        if isinstance(data, dict):
-            data_message = data.get("message")
-            if isinstance(data_message, str) and data_message.strip():
-                fragments.append(data_message.strip())
-        elif isinstance(data, str) and data.strip():
-            fragments.append(data.strip())
-        combined = " ".join(fragments).lower()
-        if not combined:
-            continue
-        if any(marker in combined for marker in upstream_markers):
-            return {
-                "outcome": "blocked",
-                "reason_code": "upstream_api_error",
-                "summary": "opencode failed due to upstream API error before producing a terminal payload",
-                "decision_required": False,
-            }
-    return None
-
-
-def _extract_wait_hint(raw_stream: str) -> dict | None:
-    for line in raw_stream.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            event = json.loads(stripped)
-        except json.JSONDecodeError:
-            continue
-        text_candidate = _extract_json_from_text_event(event)
-        if not text_candidate:
-            continue
-        try:
-            inner = json.loads(text_candidate)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(inner, dict):
-            continue
-        if inner.get("execution_kind") == "wait" and inner.get("resume_hint"):
-            return inner
-    return None
-
-
-def _extract_json_from_text_event(event: Any) -> str | None:
-    if not isinstance(event, dict) or event.get("type") != "text":
-        return None
-    part = event.get("part")
-    if not isinstance(part, dict):
-        return None
-    text = part.get("text")
-    if not isinstance(text, str):
-        return None
-    text = text.strip()
-    if text.startswith("{") and text.endswith("}"):
-        return text
-    match = re.search(r"(\{.*\})", text, re.S)
-    if match is None:
-        return None
-    candidate = match.group(1).strip()
-    if candidate.startswith("{") and candidate.endswith("}"):
-        return candidate
-    return None
-
-
 def _emit_execution_result(payload: dict) -> None:
     print(f"{EXECUTION_RESULT_MARKER}{json.dumps(payload, ensure_ascii=False)}")
 
@@ -867,31 +650,6 @@ def _emit_phase(phase: str, **fields: Any) -> None:
     print(f"TRACE executor phase={phase}{suffix}", file=sys.stderr)
 
 
-def _build_timeout_payload(
-    *,
-    timeout_seconds: int,
-    hard_cap_seconds: int | None = None,
-    timeout_kind: str | None = None,
-    partial_output: str = "",
-) -> dict:
-    if timeout_kind == "hard_cap" and hard_cap_seconds is not None:
-        summary = f"opencode exceeded hard cap after {hard_cap_seconds} seconds"
-    else:
-        summary = f"opencode exceeded timeout after {timeout_seconds} seconds"
-    if partial_output:
-        summary = f"{summary}; partial output: {partial_output}"
-    payload: dict[str, Any] = {
-        "outcome": "blocked",
-        "reason_code": "timeout",
-        "summary": summary,
-        "decision_required": False,
-    }
-    resume_context = _build_resume_context_from_output(partial_output)
-    if resume_context:
-        payload["resume_context"] = resume_context
-    return payload
-
-
 def _build_resume_context_from_output(output: str, *, max_chars: int = 1200) -> str:
     lines = [line.strip() for line in output.splitlines() if line.strip()]
     if not lines:
@@ -908,66 +666,6 @@ def _summarize_partial_output(output: str, *, max_chars: int = 240) -> str:
     if not text:
         return ""
     return text[:max_chars]
-
-
-def _build_salvaged_done_payload(*, changed_paths: list[str]) -> dict[str, Any] | None:
-    if not changed_paths:
-        return None
-    return {
-        "outcome": "done",
-        "reason_code": "missing-terminal-payload-with-repo-change",
-        "summary": (
-            "opencode changed repository content but did not emit a terminal JSON payload; "
-            "treating the attempt as done and deferring acceptance to verifier and commit safety checks."
-        ),
-        "decision_required": False,
-    }
-
-
-def _is_non_terminal_payload(payload: dict) -> bool:
-    kind = classify_execution_payload(payload)
-    if kind in {"checkpoint", "wait", "retry_intent"}:
-        return False
-    reason_code = str(payload.get("reason_code") or "").strip().lower()
-    summary = str(payload.get("summary") or "").strip().lower()
-    if reason_code in NON_TERMINAL_REASON_CODES:
-        return True
-    disallowed_summary_markers = (
-        "background context",
-        "background research",
-        "context gathering",
-        "still in flight",
-        "awaiting background",
-        "waiting for context",
-    )
-    return any(marker in summary for marker in disallowed_summary_markers)
-
-
-def _normalize_payload(payload: dict) -> dict:
-    reason_code = str(payload.get("reason_code") or "").strip().lower()
-    if reason_code in PAUSED_REASON_CODES:
-        return {
-            **payload,
-            "outcome": "needs_decision",
-            "decision_required": True,
-        }
-    return payload
-
-
-def _classify_nonzero_exit_payload(*, returncode: int) -> dict:
-    if returncode in {130, 143}:
-        return {
-            "outcome": "blocked",
-            "reason_code": "interrupted_retryable",
-            "summary": "opencode was interrupted before reaching a terminal result",
-            "decision_required": False,
-        }
-    return {
-        "outcome": "blocked",
-        "reason_code": "tooling_error",
-        "summary": f"opencode exited with code {returncode}",
-        "decision_required": False,
-    }
 
 
 def _run_monitored_subprocess(

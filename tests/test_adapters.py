@@ -847,6 +847,135 @@ def test_task_executor_logs_executor_selection_event_when_router_matches(
     ]
 
 
+def test_task_executor_force_shell_executor_bypasses_router(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("TASKPLANE_FORCE_SHELL_EXECUTOR", "1")
+    work_item = WorkItem(
+        id="issue-781",
+        title="[09-IMPL] force shell route",
+        lane="Lane 09",
+        wave="Wave0",
+        status="in_progress",
+        task_type="core_path",
+    )
+    calls: list[str] = []
+
+    class FakeRouter:
+        def select_executor(self, task_type: str, **kwargs):
+            del task_type, kwargs
+            calls.append("router")
+            return cast(
+                Any,
+                type(
+                    "Cfg",
+                    (),
+                    {"executor_name": "claude-code", "executor_type": "agent_cli"},
+                )(),
+            )
+
+    def fake_router_ctor(dsn: str, default_executor_name=None):
+        del dsn, default_executor_name
+        return FakeRouter()
+
+    def fake_shell_builder(*, command_template: str, workdir: Path):
+        def _executor(*args, **kwargs):
+            del args, kwargs
+            calls.append("shell")
+            return cast(Any, object())
+
+        return _executor
+
+    monkeypatch.setattr(
+        "taskplane.adapters.build_shell_executor",
+        fake_shell_builder,
+    )
+    monkeypatch.setattr(
+        "taskplane.executor_router.ExecutorRouter",
+        fake_router_ctor,
+    )
+
+    executor = build_task_executor(
+        command_template="echo shell",
+        workdir=tmp_path,
+        dsn="postgresql://fake/fake",
+    )
+    executor(work_item)
+
+    assert calls == ["shell"]
+
+
+def test_task_executor_prefers_explicit_custom_command_over_router_agent_cli(
+    monkeypatch, tmp_path
+):
+    work_item = WorkItem(
+        id="issue-782",
+        title="[09-IMPL] explicit custom executor command",
+        lane="Lane 09",
+        wave="Wave0",
+        status="in_progress",
+        task_type="core_path",
+    )
+    calls: list[str] = []
+
+    class FakeRouter:
+        def select_executor(self, task_type: str, **kwargs):
+            del task_type, kwargs
+            calls.append("router")
+            return cast(
+                Any,
+                type(
+                    "Cfg",
+                    (),
+                    {"executor_name": "claude-code", "executor_type": "agent_cli"},
+                )(),
+            )
+
+    def fake_router_ctor(dsn: str, default_executor_name=None):
+        del dsn, default_executor_name
+        return FakeRouter()
+
+    def fake_shell_builder(*, command_template: str, workdir: Path):
+        assert command_template == "python3 -m taskplane.demo_task_executor"
+
+        def _executor(*args, **kwargs):
+            del args, kwargs
+            calls.append("shell")
+            return cast(Any, object())
+
+        return _executor
+
+    def fake_controlled_builder(*, workdir: Path, command_template: str | None = None):
+        def _executor(*args, **kwargs):
+            del args, kwargs
+            calls.append("controlled")
+            return cast(Any, object())
+
+        return _executor
+
+    monkeypatch.setattr(
+        "taskplane.adapters.build_shell_executor",
+        fake_shell_builder,
+    )
+    monkeypatch.setattr(
+        "taskplane.adapters.build_controlled_executor",
+        fake_controlled_builder,
+    )
+    monkeypatch.setattr(
+        "taskplane.executor_router.ExecutorRouter",
+        fake_router_ctor,
+    )
+
+    executor = build_task_executor(
+        command_template="python3 -m taskplane.demo_task_executor",
+        workdir=tmp_path,
+        dsn="postgresql://fake/fake",
+    )
+    executor(work_item)
+
+    assert calls == ["shell"]
+
+
 def test_task_executor_routes_browser_by_executor_type(
     monkeypatch, tmp_path
 ):

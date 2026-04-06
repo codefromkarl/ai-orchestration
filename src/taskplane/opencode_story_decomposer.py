@@ -13,7 +13,7 @@ from psycopg.rows import dict_row
 
 from .models import TaskSpecDraft
 from .repository import PostgresControlPlaneRepository
-from .contextweaver_indexing import ensure_contextweaver_index_for_checkout
+from .contextatlas_indexing import ensure_contextatlas_index_for_checkout
 from .execution_protocol import (
     EXECUTION_CHECKPOINT_MARKER,
     EXECUTION_WAIT_MARKER,
@@ -24,13 +24,10 @@ from .story_decomposition import DECOMPOSITION_RESULT_MARKER
 def main() -> int:
     story_issue_number = os.environ.get("TASKPLANE_STORY_ISSUE_NUMBER", "").strip()
     repo = (
-        os.environ.get("TASKPLANE_STORY_REPO", "").strip()
-        or "codefromkarl/stardrifter"
+        os.environ.get("TASKPLANE_STORY_REPO", "").strip() or "codefromkarl/stardrifter"
     )
     dsn = os.environ.get("TASKPLANE_DSN", "").strip()
-    project_dir = Path(
-        os.environ.get("TASKPLANE_PROJECT_DIR") or Path.cwd()
-    ).resolve()
+    project_dir = Path(os.environ.get("TASKPLANE_PROJECT_DIR") or Path.cwd()).resolve()
     if not story_issue_number:
         raise SystemExit("TASKPLANE_STORY_ISSUE_NUMBER is required")
     if not dsn:
@@ -72,15 +69,15 @@ def main() -> int:
         if row is None:
             raise SystemExit(f"story not found: {story_issue_number}")
 
-        index_error = ensure_contextweaver_index_for_checkout(
+        index_error = ensure_contextatlas_index_for_checkout(
             project_dir,
             explicit_repo=repo,
         )
         if index_error is not None:
             payload = {
                 "outcome": "blocked",
-                "summary": f"contextweaver index failed: {index_error}",
-                "reason_code": "contextweaver-index-failed",
+                "summary": f"contextatlas index failed: {index_error}",
+                "reason_code": "contextatlas-index-failed",
             }
             print(
                 f"{DECOMPOSITION_RESULT_MARKER}{json.dumps(payload, ensure_ascii=False)}"
@@ -177,8 +174,8 @@ def _build_prompt(*, repo: str, row: dict, project_dir: Path) -> str:
         f"标题: {row['title']}\n"
         f"当前已投影 task 数: {row['story_task_count']}\n"
         f"项目目录: {project_dir}\n\n"
-        "先阅读 Story 正文，以及仓库中的 AGENTS.md、CONTRIBUTING.md、execution-plan、冻结边界。\n\n"
-        "你的任务只有一件事：为这个 Story 设计 2-4 个“当前阶段最小可执行”的 Task 方案。\n\n"
+        "只基于本次提供的 Story 正文、标题、项目目录和你能立即确定的仓库结构来思考；不要先做广泛探索，不要等待额外上下文。\n\n"
+        "你的任务只有一件事：为这个 Story 设计 2-4 个“当前阶段最小可执行”的 Task 方案。优先给出能直接落到当前仓库代码/文档路径的最小方案。\n\n"
         "硬规则：\n"
         "1. 不要创建 GitHub issue，不要修改文件，不要执行任何外部写操作；你只输出结构化 JSON，由控制面负责真正创建 issue。\n"
         "2. 如果 Story 明显属于实现、入库、runtime、geometry、projection、protocol、bridge、simulation、坐标系、转换或测试类工作，不得只创建 DOC task；至少包含一个 IMPL 或 TEST task。\n"
@@ -188,14 +185,11 @@ def _build_prompt(*, repo: str, row: dict, project_dir: Path) -> str:
         "6. 至少创建一个挂在当前 Story 下的合法 Task；如果做不到，必须返回 needs_story_refinement 或 blocked，不得返回 decomposed。\n"
         "7. Story 正文里的 `Candidate Tasks` 编号只可当历史线索，不能当成当前已存在任务；是否已有任务只以“当前已投影 task 数”为准。如果当前已投影 task 数为 0，你必须创建新的 Task，或返回 needs_story_refinement / blocked。\n"
         "8. 验证方式（verification）必须用自然语言描述验证目标，禁止写具体的 pytest 命令（如 `python3 -m pytest -q tests/unit/`）。正确示例：'确认 CSV 解析容错功能通过 focused 单测'。验证器会根据变更的文件自动推断要跑的测试。\n"
-        "9. 你可以输出两种 JSON：\n"
-        "   - 终态 JSON（terminal）：outcome 为 decomposed/needs_story_refinement/blocked，附带 task 列表\n"
-        '     格式: {"outcome":"decomposed|needs_story_refinement|blocked","summary":"...","reason_code":"...","tasks":[...]}\n'
-        "   - 检查点 JSON（checkpoint）：用于分步完成时暂存进度\n"
-        '     格式: {"execution_kind":"checkpoint","phase":"researching","summary":"...","artifacts":{},"next_action_hint":"继续生成 task"}\n'
-        "   - 等待 JSON（wait）：当需要等待外部条件或子结果时使用\n"
-        '     格式: {"execution_kind":"wait","wait_type":"subagent_result","summary":"...","resume_hint":"..."}\n'
-        "10. 最终只输出一个 JSON 对象，不要输出 Markdown 代码块。\n"
+        "9. 这是同步 decomposition 调用，不允许 checkpoint、wait、retry_intent、后台探索、等待子结果或稍后继续。\n"
+        "10. 你必须在本次响应中直接输出一个终态 JSON：outcome 只能是 decomposed / needs_story_refinement / blocked。\n"
+        '    格式: {"outcome":"decomposed|needs_story_refinement|blocked","summary":"...","reason_code":"...","tasks":[...]}\n'
+        "11. 如果你想先 research、浏览更多文件、等待上下文、等待子代理、等待工具、或者分阶段继续，这些都不允许；改为基于当前可见信息直接给出终态 JSON。\n"
+        "12. 最终只输出一个 JSON 对象，不要输出 Markdown 代码块，不要输出解释性前后文。\n"
         'JSON 格式必须是 {"outcome":"decomposed|needs_story_refinement|blocked","summary":"...","reason_code":"...","tasks":[{"title":"[01-IMPL] ...","complexity":"low|medium|high","goal":"...","allowed_paths":["..."],"dod":["..."],"verification":["..."],"references":["..."]}]}。\n\n'
         f"Story 正文如下：\n{body}\n"
     )

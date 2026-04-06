@@ -29,9 +29,9 @@ from taskplane.opencode_task_executor import (
     _load_hard_cap_seconds,
     _run_monitored_subprocess,
 )
-from taskplane.contextweaver_indexing import (
+from taskplane.contextatlas_indexing import (
     RepositoryIdentity,
-    ensure_contextweaver_index_for_checkout,
+    ensure_contextatlas_index_for_checkout,
 )
 
 
@@ -631,7 +631,7 @@ def test_build_salvaged_done_payload_promotes_missing_payload_with_repo_changes(
     }
 
 
-def test_ensure_contextweaver_index_runs_index_command(monkeypatch, tmp_path):
+def test_ensure_contextatlas_index_runs_index_command(monkeypatch, tmp_path):
     captured: dict[str, object] = {}
 
     class Completed:
@@ -647,22 +647,22 @@ def test_ensure_contextweaver_index_runs_index_command(monkeypatch, tmp_path):
     monkeypatch.setattr("subprocess.run", fake_run)
 
     monkeypatch.setenv(
-        "TASKPLANE_CONTEXTWEAVER_REGISTRY_PATH",
+        "TASKPLANE_CONTEXTATLAS_REGISTRY_PATH",
         str(tmp_path / "registry.json"),
     )
 
-    result = ensure_contextweaver_index_for_checkout(tmp_path, explicit_repo="repo")
+    result = ensure_contextatlas_index_for_checkout(tmp_path, explicit_repo="repo")
 
     assert result is None
-    assert captured["command"] == ["contextweaver", "index", str(tmp_path)]
+    assert captured["command"] == ["contextatlas", "index", str(tmp_path)]
     assert captured["cwd"] == str(tmp_path)
 
 
-def test_ensure_contextweaver_index_returns_error_when_indexing_fails(
+def test_ensure_contextatlas_index_returns_error_when_indexing_fails(
     monkeypatch, tmp_path
 ):
     monkeypatch.setattr(
-        "taskplane.contextweaver_indexing.resolve_repository_identity",
+        "taskplane.contextatlas_indexing.resolve_repository_identity",
         lambda project_dir, explicit_repo=None: RepositoryIdentity(
             project_dir=project_dir.resolve(),
             repo_root=project_dir.resolve(),
@@ -673,32 +673,32 @@ def test_ensure_contextweaver_index_returns_error_when_indexing_fails(
         ),
     )
     monkeypatch.setattr(
-        "taskplane.contextweaver_indexing._run_contextweaver_index",
+        "taskplane.contextatlas_indexing._run_contextatlas_index",
         lambda project_dir: "boom",
     )
 
     monkeypatch.setenv(
-        "TASKPLANE_CONTEXTWEAVER_REGISTRY_PATH",
+        "TASKPLANE_CONTEXTATLAS_REGISTRY_PATH",
         str(tmp_path / "registry.json"),
     )
 
-    result = ensure_contextweaver_index_for_checkout(tmp_path, explicit_repo="repo")
+    result = ensure_contextatlas_index_for_checkout(tmp_path, explicit_repo="repo")
 
     assert result == "boom"
 
 
-def test_ensure_contextweaver_index_can_be_skipped_by_env(monkeypatch, tmp_path):
+def test_ensure_contextatlas_index_can_be_skipped_by_env(monkeypatch, tmp_path):
     called = False
 
     def fake_run(*args, **kwargs):
         nonlocal called
         called = True
-        raise AssertionError("contextweaver index should have been skipped")
+        raise AssertionError("contextatlas index should have been skipped")
 
     monkeypatch.setattr("subprocess.run", fake_run)
     monkeypatch.setenv("TASKPLANE_SKIP_CONTEXTWEAVER_INDEX", "true")
 
-    result = ensure_contextweaver_index_for_checkout(tmp_path, explicit_repo="repo")
+    result = ensure_contextatlas_index_for_checkout(tmp_path, explicit_repo="repo")
 
     assert result is None
     assert called is False

@@ -318,6 +318,18 @@ def build_task_executor(
         execution_context: ExecutionContext | None = None,
         heartbeat: Callable[[], None] | None = None,
     ) -> ExecutionResult:
+        force_shell_executor = os.environ.get(
+            "TASKPLANE_FORCE_SHELL_EXECUTOR", ""
+        ).strip().lower() in {"1", "true", "yes"}
+        if force_shell_executor or _should_prefer_explicit_shell_command(
+            command_template
+        ):
+            return shell_executor(
+                work_item,
+                workspace_path=workspace_path,
+                execution_context=execution_context,
+                heartbeat=heartbeat,
+            )
         if router is not None:
             try:
                 executor_config = router.select_executor(
@@ -551,14 +563,27 @@ def _load_resume_context(execution_context: ExecutionContext | None) -> str:
 def _should_use_controlled_executor(
     *, work_item: WorkItem, execution_context: ExecutionContext | None
 ) -> bool:
-    force_shell_executor = os.environ.get(
-        "TASKPLANE_FORCE_SHELL_EXECUTOR", ""
-    ).strip().lower() in {"1", "true", "yes"}
-    if force_shell_executor:
-        return False
     if work_item.task_type:
         return work_item.task_type == "core_path"
     return _is_implementation_title(work_item.title)
+
+
+def _should_prefer_explicit_shell_command(command_template: str) -> bool:
+    normalized = command_template.strip()
+    if not normalized:
+        return False
+    lowered = normalized.lower()
+    if lowered.startswith("llm://"):
+        return False
+    controlled_modules = {
+        "python3 -m taskplane.opencode_task_executor",
+        "python -m taskplane.opencode_task_executor",
+        "python3 -m taskplane.codex_task_executor",
+        "python -m taskplane.codex_task_executor",
+    }
+    if lowered in controlled_modules:
+        return False
+    return " -m taskplane." in lowered
 
 
 def _should_use_bounded_mode(

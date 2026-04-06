@@ -83,7 +83,7 @@ def test_build_prompt_forbids_deferred_answers():
     assert "禁止回答‘我先去查文档/等待后台结果/稍后继续’" in prompt
 
 
-def test_main_blocks_when_contextweaver_index_fails(monkeypatch, capsys, tmp_path):
+def test_main_blocks_when_contextatlas_index_fails(monkeypatch, capsys, tmp_path):
     class FakeCursor:
         def __enter__(self):
             return self
@@ -118,7 +118,7 @@ def test_main_blocks_when_contextweaver_index_fails(monkeypatch, capsys, tmp_pat
         lambda *args, **kwargs: FakeConnection(),
     )
     monkeypatch.setattr(
-        "taskplane.opencode_epic_decomposer.ensure_contextweaver_index_for_checkout",
+        "taskplane.opencode_epic_decomposer.ensure_contextatlas_index_for_checkout",
         lambda project_dir, explicit_repo=None: "index failed",
     )
     monkeypatch.setenv("TASKPLANE_EPIC_ISSUE_NUMBER", "64")
@@ -134,6 +134,6 @@ def test_main_blocks_when_contextweaver_index_fails(monkeypatch, capsys, tmp_pat
     payload = json.loads(output.split("=", 1)[1])
     assert payload == {
         "outcome": "blocked",
-        "summary": "contextweaver index failed: index failed",
-        "reason_code": "contextweaver-index-failed",
+        "summary": "contextatlas index failed: index failed",
+        "reason_code": "contextatlas-index-failed",
     }
