@@ -10,6 +10,10 @@
 4. **004_artifact_store.sql** - artifact store / executor registry / task executor mapping
 5. **005_dlq_and_observability.sql** - dead letter queue / event log / observability views
 6. **006_executor_routing_profiles.sql** - 多画像 executor routing 与优先级迁移
+7. **007_natural_language_intake_review.sql** - natural_language_intent review / approval metadata
+8. **008_repo_registry.sql** - repo 注册表，供高层 workflow `link/status` 识别仓库
+
+`007_natural_language_intake_review.sql` 是当前 `natural_language_intent` review 字段的 forward migration，和 `sql/control_plane_schema.sql` 里的当前表结构保持一致，可用于旧库补列。
 
 ## 缺失表修复
 
@@ -76,6 +80,20 @@ conn.commit()
 ├── task_executor_mapping.priority
 ├── task_executor_mapping(task_type, priority) 索引
 └── 多画像 routing seed data
+
+007_natural_language_intake_review.sql
+├── natural_language_intent.approved_at
+├── natural_language_intent.approved_by
+├── natural_language_intent.reviewed_at
+├── natural_language_intent.reviewed_by
+├── natural_language_intent.review_action
+└── natural_language_intent.review_feedback
+
+008_repo_registry.sql
+├── repo_registry.repo
+├── repo_registry.workdir
+├── repo_registry.log_dir
+└── repo_registry.updated_at
 ```
 
 ## 验证迁移
