@@ -1,5 +1,7 @@
 LIST_REPOSITORIES_QUERY = """
 WITH repos AS (
+    SELECT repo FROM repo_registry
+    UNION
     SELECT repo FROM program_epic
     UNION
     SELECT repo FROM program_story
@@ -76,6 +78,17 @@ SELECT
     (SELECT MAX(updated_at) FROM work_item WHERE repo = %s) AS latest_task_update_at,
     (SELECT MAX(updated_at) FROM program_epic WHERE repo = %s) AS latest_epic_update_at,
     (SELECT MAX(updated_at) FROM program_story WHERE repo = %s) AS latest_story_update_at
+"""
+
+GET_REPO_REGISTRY_ENTRY_QUERY = """
+SELECT
+    repo,
+    workdir,
+    log_dir,
+    created_at,
+    updated_at
+FROM repo_registry
+WHERE repo = %s
 """
 
 LIST_EXECUTOR_ROUTING_PROFILES_QUERY = """

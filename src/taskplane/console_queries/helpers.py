@@ -17,6 +17,8 @@ ORDER BY status
 REQUIRE_REPO_QUERY = """
 SELECT repo
 FROM (
+    SELECT repo FROM repo_registry
+    UNION
     SELECT repo FROM program_epic
     UNION
     SELECT repo FROM program_story
