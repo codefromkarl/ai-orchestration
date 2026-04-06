@@ -11,7 +11,7 @@ from ._console_api_internal import (
     _normalize_row,
     _require_repo,
 )
-from .contextweaver_indexing import (
+from .contextatlas_indexing import (
     CheckoutAliasRecord,
     FileIndexRegistry,
     _default_registry_path,

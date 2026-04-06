@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-import json
 import os
 from pathlib import Path
 import shlex
@@ -9,7 +8,9 @@ from types import SimpleNamespace
 from typing import Any, Callable
 
 from .factory import build_postgres_repository
+from .epic_resume_cli import refresh_epic_execution_state
 from .scheduling_loop import _load_running_jobs
+from .settings import load_taskplane_config, resolve_config_path
 from .supervisor_cli import _launch_managed_process
 from .job_launcher import insert_execution_job as _insert_execution_job
 
@@ -56,66 +57,27 @@ class ConsoleActionNotFoundError(RuntimeError):
 
 
 def load_console_action_settings_from_env() -> ConsoleActionSettings:
-    dsn = os.getenv("TASKPLANE_DSN", "").strip()
+    config = load_taskplane_config()
+    dsn = config.postgres_dsn.strip()
     if not dsn:
         raise ConsoleActionConfigurationError(
-            "TASKPLANE_DSN is required"
+            "TASKPLANE_DSN is required (or set [postgres].dsn in taskplane.toml)"
         )
-
-    raw_mapping = os.getenv("TASKPLANE_CONSOLE_REPO_WORKDIRS_JSON", "").strip()
-    if not raw_mapping:
-        raise ConsoleActionConfigurationError(
-            "TASKPLANE_CONSOLE_REPO_WORKDIRS_JSON is required"
-        )
-    try:
-        parsed = json.loads(raw_mapping)
-    except json.JSONDecodeError as exc:
-        raise ConsoleActionConfigurationError(
-            "TASKPLANE_CONSOLE_REPO_WORKDIRS_JSON must be valid JSON"
-        ) from exc
-    if not isinstance(parsed, dict):
-        raise ConsoleActionConfigurationError(
-            "TASKPLANE_CONSOLE_REPO_WORKDIRS_JSON must be a JSON object"
-        )
-
-    raw_log_mapping = os.getenv("TASKPLANE_CONSOLE_REPO_LOG_DIRS_JSON", "").strip()
-    if not raw_log_mapping:
-        raise ConsoleActionConfigurationError(
-            "TASKPLANE_CONSOLE_REPO_LOG_DIRS_JSON is required"
-        )
-    try:
-        parsed_logs = json.loads(raw_log_mapping)
-    except json.JSONDecodeError as exc:
-        raise ConsoleActionConfigurationError(
-            "TASKPLANE_CONSOLE_REPO_LOG_DIRS_JSON must be valid JSON"
-        ) from exc
-    if not isinstance(parsed_logs, dict):
-        raise ConsoleActionConfigurationError(
-            "TASKPLANE_CONSOLE_REPO_LOG_DIRS_JSON must be a JSON object"
-        )
-
-    repo_workdirs: dict[str, str] = {}
-    for repo, workdir in parsed.items():
-        repo_name = str(repo).strip()
-        workdir_value = str(workdir).strip()
-        if repo_name and workdir_value:
-            repo_workdirs[repo_name] = workdir_value
-
+    repo_workdirs = _normalize_repo_paths(
+        mapping=config.console_repo_workdirs,
+        source_path=config.source_path,
+    )
     if not repo_workdirs:
         raise ConsoleActionConfigurationError(
-            "TASKPLANE_CONSOLE_REPO_WORKDIRS_JSON must define at least one repo"
+            "console.repo_workdirs must define at least one repo"
         )
-
-    repo_log_dirs: dict[str, str] = {}
-    for repo, log_dir in parsed_logs.items():
-        repo_name = str(repo).strip()
-        log_dir_value = str(log_dir).strip()
-        if repo_name and log_dir_value:
-            repo_log_dirs[repo_name] = log_dir_value
-
+    repo_log_dirs = _normalize_repo_paths(
+        mapping=config.console_repo_log_dirs,
+        source_path=config.source_path,
+    )
     if not repo_log_dirs:
         raise ConsoleActionConfigurationError(
-            "TASKPLANE_CONSOLE_REPO_LOG_DIRS_JSON must define at least one repo"
+            "console.repo_log_dirs must define at least one repo"
         )
 
     return ConsoleActionSettings(
@@ -137,6 +99,23 @@ def load_console_action_settings_from_env() -> ConsoleActionSettings:
             or DEFAULT_STORY_DECOMPOSER_COMMAND
         ),
     )
+
+
+def _normalize_repo_paths(
+    *,
+    mapping: dict[str, str],
+    source_path: Path | None,
+) -> dict[str, str]:
+    normalized: dict[str, str] = {}
+    for repo, raw_path in mapping.items():
+        repo_name = str(repo).strip()
+        path_value = str(raw_path).strip()
+        if not repo_name or not path_value:
+            continue
+        normalized[repo_name] = str(
+            resolve_config_path(path_value, source_path=source_path)
+        )
+    return normalized
 
 
 def run_epic_split_action(
@@ -343,6 +322,48 @@ def run_task_retry_action(
             "next_eligible_at": refreshed.next_eligible_at,
             "blocked_reason": refreshed.blocked_reason,
             "decision_required": refreshed.decision_required,
+        },
+    }
+
+
+def run_operator_request_ack_action(
+    *,
+    repo: str,
+    epic_issue_number: int,
+    reason_code: str,
+    closed_reason: str = "acknowledged",
+    settings: ConsoleActionSettings | None = None,
+    repository_builder: Callable[..., Any] = build_postgres_repository,
+) -> dict[str, Any]:
+    settings = settings or load_console_action_settings_from_env()
+    repository = repository_builder(dsn=settings.dsn)
+    request = repository.close_operator_request(
+        repo=repo,
+        epic_issue_number=epic_issue_number,
+        reason_code=reason_code,
+        closed_reason=closed_reason,
+    )
+    if request is None:
+        raise ConsoleActionNotFoundError(
+            f"operator request not found for epic {epic_issue_number}: {reason_code}"
+        )
+    refresh = refresh_epic_execution_state(
+        repository=repository,
+        repo=repo,
+        epic_issue_number=epic_issue_number,
+    )
+    return {
+        "accepted": True,
+        "action": "ack_operator_request",
+        "repo": repo,
+        "epic_issue_number": epic_issue_number,
+        "reason_code": reason_code,
+        "closed_reason": closed_reason,
+        "operator_request": asdict(request),
+        "refresh": {
+            "state": asdict(refresh.state),
+            "open_request_count": refresh.open_request_count,
+            "continue_ready": refresh.continue_ready,
         },
     }
 

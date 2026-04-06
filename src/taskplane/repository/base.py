@@ -16,9 +16,11 @@ from typing import Any
 
 from ..models import (
     ApprovalEvent,
+    BlockingMode,
     EpicExecutionState,
     ExecutionRun,
     GuardrailViolation,
+    NaturalLanguageIntent,
     OperatorRequest,
     ProgramStory,
     QueueEvaluation,
@@ -26,6 +28,7 @@ from ..models import (
     StoryPullRequestLink,
     StoryVerificationRun,
     TaskSpecDraft,
+    TaskType,
     VerificationEvidence,
     WorkClaim,
     WorkDependency,
@@ -39,6 +42,8 @@ from ..queue import paths_conflict
 from .helpers import _claim_has_path_conflict
 
 LEASE_DURATION = timedelta(minutes=15)
+INTAKE_EPIC_START = 1_500_000_000
+INTAKE_STORY_START = 1_600_000_000
 
 
 @dataclass
@@ -68,6 +73,9 @@ class InMemoryControlPlaneRepository:
     )
     task_spec_drafts: list[TaskSpecDraft] = field(default_factory=list)
     approval_events: list[ApprovalEvent] = field(default_factory=list)
+    natural_language_intents: dict[str, NaturalLanguageIntent] = field(
+        default_factory=dict
+    )
     _claim_lock: threading.RLock = field(
         default_factory=threading.RLock, init=False, repr=False
     )
@@ -84,15 +92,50 @@ class InMemoryControlPlaneRepository:
     def list_active_work_items(self) -> list[WorkItem]:
         return self.list_work_items()
 
-    def list_story_work_item_ids(self, story_issue_number: int) -> list[str]:
+    def create_ad_hoc_work_item(
+        self,
+        *,
+        work_id: str,
+        repo: str,
+        title: str,
+        lane: str = "general",
+        wave: str = "Direct",
+        task_type: TaskType = "core_path",
+        blocking_mode: BlockingMode = "soft",
+        planned_paths: tuple[str, ...] = (),
+        metadata: dict[str, Any] | None = None,
+    ) -> WorkItem:
+        metadata = metadata or {}
+        work_item = WorkItem(
+            id=work_id,
+            repo=repo,
+            title=title,
+            lane=lane,
+            wave=wave,
+            status="ready",
+            task_type=task_type,
+            blocking_mode=blocking_mode,
+            planned_paths=planned_paths,
+        )
+        self.work_items_by_id[work_id] = work_item
+        self.work_items.append(work_item)
+        self.targets_by_work_id.setdefault(work_id, [])
+        return work_item
+
+    def list_story_work_item_ids(
+        self, story_issue_number: int, repo: str | None = None
+    ) -> list[str]:
         return sorted(
             [
                 item.id
                 for item in self.work_items_by_id.values()
-                if item.canonical_story_issue_number == story_issue_number
-                or (
-                    item.canonical_story_issue_number is None
-                    and story_issue_number in item.story_issue_numbers
+                if (repo is None or item.repo is None or item.repo == repo)
+                and (
+                    item.canonical_story_issue_number == story_issue_number
+                    or (
+                        item.canonical_story_issue_number is None
+                        and story_issue_number in item.story_issue_numbers
+                    )
                 )
             ]
         )
@@ -210,6 +253,11 @@ class InMemoryControlPlaneRepository:
         }
 
     def sync_ready_states(self) -> None:
+        self._repair_or_recover_ready_state_inputs()
+        ready_ids = self._derive_ready_candidate_ids()
+        self._apply_ready_state_transitions(ready_ids)
+
+    def _repair_or_recover_ready_state_inputs(self) -> None:
         active_claim_ids = {claim.work_id for claim in self.list_active_work_claims()}
         for work_item in self.list_work_items():
             if (
@@ -217,24 +265,19 @@ class InMemoryControlPlaneRepository:
                 and work_item.id not in active_claim_ids
             ):
                 self.update_work_status(work_item.id, "pending")
-        ready_ids = derive_ready_work_ids(
-            self.list_work_items(),
-            self.dependencies,
-            story_dependencies=self.story_dependencies,
+
+    def _derive_ready_candidate_ids(self) -> set[str]:
+        return set(
+            derive_ready_work_ids(
+                self.list_work_items(),
+                self.dependencies,
+                story_dependencies=self.story_dependencies,
+            )
         )
+
+    def _apply_ready_state_transitions(self, ready_ids: set[str]) -> None:
         for work_item in self.list_work_items():
-            is_eligible = True
-            if work_item.next_eligible_at is not None:
-                try:
-                    next_eligible_at = datetime.fromisoformat(
-                        work_item.next_eligible_at
-                    )
-                except ValueError:
-                    is_eligible = True
-                else:
-                    if next_eligible_at.tzinfo is None:
-                        next_eligible_at = next_eligible_at.replace(tzinfo=UTC)
-                    is_eligible = next_eligible_at <= datetime.now(UTC)
+            is_eligible = self._is_ready_transition_eligible(work_item)
             if (
                 work_item.status == "pending"
                 and work_item.id in ready_ids
@@ -245,6 +288,17 @@ class InMemoryControlPlaneRepository:
                 work_item.id not in ready_ids or not is_eligible
             ):
                 self.update_work_status(work_item.id, "pending")
+
+    def _is_ready_transition_eligible(self, work_item: WorkItem) -> bool:
+        if work_item.next_eligible_at is None:
+            return True
+        try:
+            next_eligible_at = datetime.fromisoformat(work_item.next_eligible_at)
+        except ValueError:
+            return True
+        if next_eligible_at.tzinfo is None:
+            next_eligible_at = next_eligible_at.replace(tzinfo=UTC)
+        return next_eligible_at <= datetime.now(UTC)
 
     def claim_ready_work_item(
         self,
@@ -491,6 +545,166 @@ class InMemoryControlPlaneRepository:
         self.task_spec_drafts.append(draft)
         return len(self.task_spec_drafts)
 
+    def record_natural_language_intent(
+        self, intent: NaturalLanguageIntent
+    ) -> str | None:
+        self.natural_language_intents[intent.id] = intent
+        return intent.id
+
+    def update_natural_language_intent(self, intent: NaturalLanguageIntent) -> None:
+        self.natural_language_intents[intent.id] = intent
+
+    def get_natural_language_intent(
+        self, intent_id: str
+    ) -> NaturalLanguageIntent | None:
+        return self.natural_language_intents.get(intent_id)
+
+    def list_natural_language_intents(
+        self, *, repo: str
+    ) -> list[NaturalLanguageIntent]:
+        return [
+            intent
+            for intent in self.natural_language_intents.values()
+            if intent.repo == repo
+        ]
+
+    def promote_natural_language_proposal(
+        self,
+        *,
+        intent_id: str,
+        proposal: dict[str, Any],
+        approver: str,
+    ) -> int:
+        intent = self.natural_language_intents[intent_id]
+        epic_issue_number = INTAKE_EPIC_START + len(self.natural_language_intents)
+        epic_payload = proposal.get("epic") if isinstance(proposal, dict) else {}
+        if not isinstance(epic_payload, dict):
+            epic_payload = {}
+        stories_payload = proposal.get("stories") if isinstance(proposal, dict) else []
+        if not isinstance(stories_payload, list):
+            stories_payload = []
+
+        story_key_to_issue_number: dict[str, int] = {}
+        next_story_issue_number = INTAKE_STORY_START + len(self.program_stories)
+        for index, story_payload in enumerate(stories_payload, start=1):
+            if not isinstance(story_payload, dict):
+                continue
+            story_issue_number = next_story_issue_number
+            next_story_issue_number += 1
+            story_key = str(story_payload.get("story_key") or f"S{index}")
+            story_key_to_issue_number[story_key] = story_issue_number
+            self.program_stories.append(
+                ProgramStory(
+                    issue_number=story_issue_number,
+                    repo=intent.repo,
+                    epic_issue_number=epic_issue_number,
+                    title=str(story_payload.get("title") or f"Story {index}"),
+                    lane=str(story_payload.get("lane") or epic_payload.get("lane") or "Lane 01"),
+                    complexity=str(story_payload.get("complexity") or "medium"),
+                    program_status="approved",
+                    execution_status="active",
+                    active_wave=f"wave-{index}",
+                    notes=f"intake:{intent_id}",
+                )
+            )
+
+        created_work_ids: list[str] = []
+        work_dependencies: list[WorkDependency] = []
+        for story_index, story_payload in enumerate(stories_payload, start=1):
+            if not isinstance(story_payload, dict):
+                continue
+            story_issue_number = story_key_to_issue_number[
+                str(story_payload.get("story_key") or f"S{story_index}")
+            ]
+            task_payloads = story_payload.get("tasks")
+            if not isinstance(task_payloads, list):
+                task_payloads = []
+            story_work_ids: list[str] = []
+            for task_index, task_payload in enumerate(task_payloads, start=1):
+                if not isinstance(task_payload, dict):
+                    continue
+                work_id = f"intent-{intent_id}-t{story_index}-{task_index}"
+                planned_paths_raw = task_payload.get("planned_paths")
+                planned_paths = tuple(
+                    str(path)
+                    for path in planned_paths_raw
+                    if isinstance(path, str) and path.strip()
+                ) if isinstance(planned_paths_raw, list) else ()
+                work_item = WorkItem(
+                    id=work_id,
+                    repo=intent.repo,
+                    title=str(task_payload.get("title") or f"Task {story_index}.{task_index}"),
+                    lane=str(task_payload.get("lane") or story_payload.get("lane") or epic_payload.get("lane") or "Lane 01"),
+                    wave=str(task_payload.get("wave") or f"wave-{story_index}"),
+                    status="pending",
+                    task_type="core_path",
+                    blocking_mode="hard",
+                    canonical_story_issue_number=story_issue_number,
+                    story_issue_numbers=(story_issue_number,),
+                    source_issue_number=story_issue_number,
+                    planned_paths=planned_paths,
+                )
+                self.work_items_by_id[work_id] = work_item
+                self.work_items.append(work_item)
+                self.targets_by_work_id.setdefault(work_id, [])
+                story_work_ids.append(work_id)
+                created_work_ids.append(work_id)
+                self.record_task_spec_draft(
+                    TaskSpecDraft(
+                        repo=intent.repo,
+                        story_issue_number=story_issue_number,
+                        title=work_item.title,
+                        complexity=str(story_payload.get("complexity") or "medium"),
+                        goal=str(task_payload.get("title") or work_item.title),
+                        allowed_paths=planned_paths,
+                        dod=tuple(str(item) for item in (task_payload.get("dod") or []) if str(item).strip()),
+                        verification=tuple(str(item) for item in (task_payload.get("verification") or []) if str(item).strip()),
+                        references=(intent.id,),
+                    )
+                )
+
+            depends_on_story_keys = story_payload.get("depends_on_story_keys")
+            if isinstance(depends_on_story_keys, list):
+                for depends_on_story_key in depends_on_story_keys:
+                    dependency_story_issue_number = story_key_to_issue_number.get(
+                        str(depends_on_story_key)
+                    )
+                    if dependency_story_issue_number is None:
+                        continue
+                    self.story_dependencies.append(
+                        (story_issue_number, dependency_story_issue_number)
+                    )
+                    dependency_work_ids = [
+                        work_id
+                        for work_id in created_work_ids
+                        if self.work_items_by_id[work_id].canonical_story_issue_number
+                        == dependency_story_issue_number
+                    ]
+                    for story_work_id in story_work_ids:
+                        for dependency_work_id in dependency_work_ids:
+                            work_dependencies.append(
+                                WorkDependency(
+                                    work_id=story_work_id,
+                                    depends_on_work_id=dependency_work_id,
+                                )
+                            )
+
+        for dependency in work_dependencies:
+            if dependency not in self.dependencies:
+                self.dependencies.append(dependency)
+
+        self.sync_ready_states()
+        updated_intent = replace(
+            intent,
+            status="promoted",
+            promoted_epic_issue_number=epic_issue_number,
+            approved_by=approver,
+            approved_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        self.natural_language_intents[intent_id] = updated_intent
+        return epic_issue_number
+
     def record_approval_event(self, event: ApprovalEvent) -> int | None:
         self.approval_events.append(event)
         return len(self.approval_events)
@@ -510,6 +724,33 @@ class InMemoryControlPlaneRepository:
         commit_link: dict[str, Any] | None = None,
         pull_request_link: dict[str, Any] | None = None,
     ) -> None:
+        self._apply_finalization_status_update(
+            work_id=work_id,
+            status=status,
+            blocked_reason=blocked_reason,
+            decision_required=decision_required,
+            attempt_count=attempt_count,
+            last_failure_reason=last_failure_reason,
+            next_eligible_at=next_eligible_at,
+        )
+        self._record_finalization_followups(
+            execution_run=execution_run,
+            verification=verification,
+            commit_link=commit_link,
+            pull_request_link=pull_request_link,
+        )
+
+    def _apply_finalization_status_update(
+        self,
+        *,
+        work_id: str,
+        status: WorkStatus,
+        blocked_reason: str | None = None,
+        decision_required: bool = False,
+        attempt_count: int | None = None,
+        last_failure_reason: str | None = None,
+        next_eligible_at: str | None = None,
+    ) -> None:
         self.update_work_status(
             work_id,
             status,
@@ -519,6 +760,15 @@ class InMemoryControlPlaneRepository:
             last_failure_reason=last_failure_reason,
             next_eligible_at=next_eligible_at,
         )
+
+    def _record_finalization_followups(
+        self,
+        *,
+        execution_run: ExecutionRun,
+        verification: VerificationEvidence | None = None,
+        commit_link: dict[str, Any] | None = None,
+        pull_request_link: dict[str, Any] | None = None,
+    ) -> None:
         run_id = self.record_run(execution_run)
         if verification is not None:
             self.record_verification(

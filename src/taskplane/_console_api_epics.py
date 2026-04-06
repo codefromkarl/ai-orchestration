@@ -102,6 +102,11 @@ def get_epic_detail(
         queries.GET_EPIC_RUNNING_JOBS_QUERY,
         (repo, repo, epic_issue_number, epic_issue_number),
     )
+    operator_requests = _fetch_all(
+        connection,
+        queries.GET_EPIC_OPERATOR_REQUESTS_QUERY,
+        (repo, epic_issue_number),
+    )
 
     return {
         "repo": repo,
@@ -111,4 +116,5 @@ def get_epic_detail(
         "dependencies": [_normalize_row(row) for row in epic_dependencies],
         "execution_state": _normalize_row(execution_state or {}),
         "running_jobs": [_normalize_row(row) for row in running_jobs],
+        "operator_requests": [_normalize_row(row) for row in operator_requests],
     }

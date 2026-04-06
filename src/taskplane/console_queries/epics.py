@@ -552,3 +552,22 @@ WHERE repo = %s
   )
 ORDER BY started_at DESC, id DESC
 """
+
+GET_EPIC_OPERATOR_REQUESTS_QUERY = """
+SELECT
+    repo,
+    epic_issue_number,
+    reason_code,
+    summary,
+    remaining_story_issue_numbers_json,
+    blocked_story_issue_numbers_json,
+    status,
+    opened_at,
+    closed_at,
+    closed_reason
+FROM operator_request
+WHERE repo = %s
+  AND epic_issue_number = %s
+  AND status = 'open'
+ORDER BY opened_at ASC, reason_code ASC
+"""

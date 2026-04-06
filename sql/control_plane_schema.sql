@@ -387,6 +387,45 @@ ALTER TABLE operator_request
 ALTER TABLE operator_request
     ADD COLUMN IF NOT EXISTS closed_reason TEXT;
 
+CREATE TABLE IF NOT EXISTS natural_language_intent (
+    id TEXT PRIMARY KEY,
+    repo TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    status TEXT NOT NULL,
+    conversation_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    summary TEXT NOT NULL DEFAULT '',
+    clarification_questions_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    proposal_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    analysis_model TEXT,
+    promoted_epic_issue_number INTEGER,
+    approved_at TIMESTAMPTZ,
+    approved_by TEXT,
+    reviewed_at TIMESTAMPTZ,
+    reviewed_by TEXT,
+    review_action TEXT,
+    review_feedback TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE natural_language_intent
+    ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
+
+ALTER TABLE natural_language_intent
+    ADD COLUMN IF NOT EXISTS approved_by TEXT;
+
+ALTER TABLE natural_language_intent
+    ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+
+ALTER TABLE natural_language_intent
+    ADD COLUMN IF NOT EXISTS reviewed_by TEXT;
+
+ALTER TABLE natural_language_intent
+    ADD COLUMN IF NOT EXISTS review_action TEXT;
+
+ALTER TABLE natural_language_intent
+    ADD COLUMN IF NOT EXISTS review_feedback TEXT;
+
 CREATE TABLE IF NOT EXISTS execution_job (
     id BIGSERIAL PRIMARY KEY,
     repo TEXT NOT NULL,

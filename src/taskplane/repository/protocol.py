@@ -13,6 +13,7 @@ from ..models import (
     EpicExecutionState,
     ExecutionRun,
     GuardrailViolation,
+    NaturalLanguageIntent,
     OperatorRequest,
     ProgramStory,
     QueueEvaluation,
@@ -32,6 +33,19 @@ from ..models import (
 class WorkStateRepository(Protocol):
     def list_work_items(self) -> list[WorkItem]: ...
     def list_active_work_items(self) -> list[WorkItem]: ...
+    def create_ad_hoc_work_item(
+        self,
+        *,
+        work_id: str,
+        repo: str,
+        title: str,
+        lane: str = "general",
+        wave: str = "Direct",
+        task_type: str = "core_path",
+        blocking_mode: str = "soft",
+        planned_paths: tuple[str, ...] = (),
+        metadata: dict[str, Any] | None = None,
+    ) -> WorkItem: ...
     def list_dependencies(self) -> list[WorkDependency]: ...
     def list_targets_by_work_id(self) -> dict[str, list[WorkTarget]]: ...
     def sync_ready_states(self) -> None: ...
@@ -50,6 +64,12 @@ class WorkStateRepository(Protocol):
     def mark_blocked(
         self, work_id: str, violations: list[GuardrailViolation]
     ) -> None: ...
+
+
+class ReadyStateSyncRepository(Protocol):
+    """Minimal capability required to refresh runnable work before scheduling."""
+
+    def sync_ready_states(self) -> None: ...
 
 
 class ClaimRepository(Protocol):
@@ -179,7 +199,6 @@ class ExecutionRepository(Protocol):
         commit_link: dict[str, Any] | None = None,
         pull_request_link: dict[str, Any] | None = None,
     ) -> None: ...
-    def record_approval_event(self, event: ApprovalEvent) -> int | None: ...
 
 
 class WorkerRepository(
@@ -192,7 +211,9 @@ class WorkerRepository(
 
 
 class StoryRepository(WorkerRepository, Protocol):
-    def list_story_work_item_ids(self, story_issue_number: int) -> list[str]: ...
+    def list_story_work_item_ids(
+        self, story_issue_number: int, repo: str | None = None
+    ) -> list[str]: ...
     def list_program_stories_for_epic(
         self, *, repo: str, epic_issue_number: int
     ) -> list[ProgramStory]: ...
@@ -258,6 +279,28 @@ class EpicDecompositionRepository(Protocol):
     ) -> None: ...
 
 
+class SupervisorSchedulingRepository(Protocol):
+    """Minimal repository surface required by the supervisor scheduling loop."""
+
+    def list_program_stories_for_epic(
+        self, *, repo: str, epic_issue_number: int
+    ) -> list[ProgramStory]: ...
+
+    def list_story_work_item_ids(
+        self, story_issue_number: int, repo: str | None = None
+    ) -> list[str]: ...
+
+    def get_work_item(self, work_id: str) -> WorkItem: ...
+
+    def upsert_epic_execution_state(self, state: EpicExecutionState) -> None: ...
+
+    def get_epic_execution_state(
+        self, *, repo: str, epic_issue_number: int
+    ) -> EpicExecutionState | None: ...
+
+    def record_operator_request(self, request: OperatorRequest) -> int | None: ...
+
+
 class ControlPlaneRepository(
     StoryRepository,
     EpicRepository,
@@ -268,3 +311,20 @@ class ControlPlaneRepository(
     """Protocol defining the full repository interface for the control plane."""
 
     def record_task_spec_draft(self, draft: TaskSpecDraft) -> int | None: ...
+    def record_natural_language_intent(
+        self, intent: NaturalLanguageIntent
+    ) -> str | None: ...
+    def update_natural_language_intent(self, intent: NaturalLanguageIntent) -> None: ...
+    def get_natural_language_intent(
+        self, intent_id: str
+    ) -> NaturalLanguageIntent | None: ...
+    def list_natural_language_intents(
+        self, *, repo: str
+    ) -> list[NaturalLanguageIntent]: ...
+    def promote_natural_language_proposal(
+        self,
+        *,
+        intent_id: str,
+        proposal: dict[str, Any],
+        approver: str,
+    ) -> int: ...

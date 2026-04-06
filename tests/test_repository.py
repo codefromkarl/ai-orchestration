@@ -82,8 +82,48 @@ def test_in_memory_repository_sync_ready_states_promotes_pending_items():
     assert repository.work_items_by_id["task-3"].status == "pending"
 
 
+def test_in_memory_repository_sync_ready_states_stages_recovery_derivation_and_apply(
+    monkeypatch,
+):
+    repository = InMemoryControlPlaneRepository(
+        work_items=[],
+        dependencies=[],
+        targets_by_work_id={},
+    )
+    calls: list[object] = []
+
+    monkeypatch.setattr(
+        repository,
+        "_repair_or_recover_ready_state_inputs",
+        lambda: calls.append("repair_or_recover"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        repository,
+        "_derive_ready_candidate_ids",
+        lambda: (calls.append("derive_ready_ids") or {"task-2"}),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        repository,
+        "_apply_ready_state_transitions",
+        lambda ready_ids: calls.append(("apply_transitions", ready_ids)),
+        raising=False,
+    )
+
+    repository.sync_ready_states()
+
+    assert calls == [
+        "repair_or_recover",
+        "derive_ready_ids",
+        ("apply_transitions", {"task-2"}),
+    ]
+
+
 def test_repository_module_exports_narrower_protocols_for_runtime_boundaries():
     expected_exports = {
+        "ReadyStateSyncRepository",
+        "SupervisorSchedulingRepository",
         "WorkStateRepository",
         "ClaimRepository",
         "ExecutionRepository",
@@ -311,6 +351,54 @@ def test_postgres_repository_sync_ready_states_recovers_abandoned_in_progress_it
     assert "NOT EXISTS (" in executed_sql
     assert "FROM work_claim wc" in executed_sql
     assert "wc.lease_expires_at IS NULL OR wc.lease_expires_at > NOW()" in executed_sql
+
+
+def test_postgres_repository_sync_ready_states_excludes_waiting_sessions_in_sql():
+    connection = FakeConnection()
+    repository = PostgresControlPlaneRepository(connection)
+
+    repository.sync_ready_states()
+
+    executed_sql = "\n".join(connection.executed_sql)
+    assert "FROM execution_session es" in executed_sql
+    assert "es.work_id = wi.id" in executed_sql
+    assert "es.status IN ('suspended', 'waiting_internal', 'waiting_external')" in executed_sql
+
+
+def test_postgres_repository_sync_ready_states_stages_repair_derivation_and_apply(
+    monkeypatch,
+):
+    connection = FakeConnection()
+    repository = PostgresControlPlaneRepository(connection)
+    calls: list[object] = []
+
+    monkeypatch.setattr(
+        repository,
+        "_repair_or_recover_ready_state_inputs",
+        lambda cursor: calls.append(("repair_or_recover", cursor)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        repository,
+        "_derive_ready_candidate_ids",
+        lambda cursor: (calls.append(("derive_ready_ids", cursor)) or {"task-2"}),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        repository,
+        "_apply_ready_state_transitions",
+        lambda cursor, ready_ids: calls.append(("apply_transitions", cursor, ready_ids)),
+        raising=False,
+    )
+
+    repository.sync_ready_states()
+
+    assert [call[0] for call in calls] == [
+        "repair_or_recover",
+        "derive_ready_ids",
+        "apply_transitions",
+    ]
+    assert calls[-1][2] == {"task-2"}
 
 
 def test_in_memory_repository_claim_ready_work_item_rejects_overlapping_claimed_paths():
@@ -980,6 +1068,136 @@ def test_postgres_repository_records_task_spec_draft_sql():
     assert "INSERT INTO story_task_draft" in executed_sql
 
 
+def test_in_memory_repository_records_and_updates_natural_language_intent():
+    from taskplane.models import NaturalLanguageIntent
+
+    repository = InMemoryControlPlaneRepository(
+        work_items=[],
+        dependencies=[],
+        targets_by_work_id={},
+    )
+
+    intent = NaturalLanguageIntent(
+        id="intent-1",
+        repo="codefromkarl/stardrifter",
+        prompt="实现认证系统",
+        status="awaiting_review",
+        conversation=(
+            {"role": "user", "content": "实现认证系统"},
+        ),
+        summary="ready",
+        clarification_questions=(),
+        proposal_json={"epic": {"title": "Auth"}, "stories": []},
+    )
+
+    repository.record_natural_language_intent(intent)
+    listed = repository.list_natural_language_intents(repo="codefromkarl/stardrifter")
+
+    assert listed == [intent]
+
+    updated = NaturalLanguageIntent(
+        id="intent-1",
+        repo="codefromkarl/stardrifter",
+        prompt="实现认证系统",
+        status="promoted",
+        conversation=(
+            {"role": "user", "content": "实现认证系统"},
+        ),
+        summary="promoted",
+        clarification_questions=(),
+        proposal_json={"epic": {"title": "Auth"}, "stories": []},
+        promoted_epic_issue_number=900000001,
+    )
+    repository.update_natural_language_intent(updated)
+
+    assert repository.get_natural_language_intent("intent-1") == updated
+
+
+def test_postgres_repository_records_and_lists_natural_language_intents():
+    from taskplane.models import NaturalLanguageIntent
+
+    connection = FakeConnection(
+        fetchone_results=[{"id": "intent-1"}],
+        fetchall_results=[[
+            {
+                "id": "intent-1",
+                "repo": "codefromkarl/stardrifter",
+                "prompt": "实现认证系统",
+                "status": "awaiting_review",
+                "conversation_json": [{"role": "user", "content": "实现认证系统"}],
+                "summary": "ready",
+                "clarification_questions_json": [],
+                "proposal_json": {"epic": {"title": "Auth"}, "stories": []},
+                "analysis_model": "gpt-4.1-mini",
+                "promoted_epic_issue_number": None,
+                "created_at": None,
+                "updated_at": None,
+                "approved_at": None,
+                "approved_by": None,
+            }
+        ]],
+    )
+    repository = PostgresControlPlaneRepository(connection)
+
+    record_id = repository.record_natural_language_intent(
+        NaturalLanguageIntent(
+            id="intent-1",
+            repo="codefromkarl/stardrifter",
+            prompt="实现认证系统",
+            status="awaiting_review",
+            conversation=(({"role": "user", "content": "实现认证系统"}),),
+            summary="ready",
+            clarification_questions=(),
+            proposal_json={"epic": {"title": "Auth"}, "stories": []},
+            analysis_model="gpt-4.1-mini",
+        )
+    )
+    listed = repository.list_natural_language_intents(repo="codefromkarl/stardrifter")
+
+    assert record_id == "intent-1"
+    assert listed[0].id == "intent-1"
+    executed_sql = "\n".join(connection.executed_sql)
+    assert "INSERT INTO natural_language_intent" in executed_sql
+    assert "FROM natural_language_intent" in executed_sql
+
+
+def test_postgres_natural_language_intent_helpers_preserve_review_fields():
+    from taskplane.models import NaturalLanguageIntent
+    from taskplane.repository._postgres_intake import (
+        NATURAL_LANGUAGE_INTENT_SELECT_SQL,
+        build_record_natural_language_intent_params,
+    )
+
+    intent = NaturalLanguageIntent(
+        id="intent-1",
+        repo="codefromkarl/stardrifter",
+        prompt="实现认证系统",
+        status="awaiting_review",
+        conversation=(({"role": "user", "content": "实现认证系统"}),),
+        summary="ready",
+        clarification_questions=("请补充 JWT 范围",),
+        proposal_json={"epic": {"title": "Auth"}, "stories": []},
+        analysis_model="gpt-4.1-mini",
+        approved_by="alice",
+        reviewed_by="bob",
+        review_action="approve",
+        review_feedback="looks good",
+    )
+
+    params = build_record_natural_language_intent_params(intent)
+
+    assert "reviewed_at" in NATURAL_LANGUAGE_INTENT_SELECT_SQL
+    assert "reviewed_by" in NATURAL_LANGUAGE_INTENT_SELECT_SQL
+    assert "review_action" in NATURAL_LANGUAGE_INTENT_SELECT_SQL
+    assert "review_feedback" in NATURAL_LANGUAGE_INTENT_SELECT_SQL
+    assert params[0] == "intent-1"
+    assert params[4] == '[{"role": "user", "content": "实现认证系统"}]'
+    assert params[6] == '["请补充 JWT 范围"]'
+    assert params[13] == "bob"
+    assert params[14] == "approve"
+    assert params[15] == "looks good"
+
+
 def test_in_memory_repository_records_and_queries_story_pull_request_link():
     repository = InMemoryControlPlaneRepository(
         work_items=[],
@@ -1162,6 +1380,150 @@ def test_postgres_repository_records_and_lists_operator_requests():
     assert "FROM operator_request" in executed_sql
 
 
+def test_postgres_operator_request_query_helpers_preserve_filter_contract():
+    from taskplane.repository._postgres_operator_requests import (
+        OPERATOR_REQUEST_SELECT_SQL,
+        build_list_operator_requests_query,
+    )
+
+    sql, params = build_list_operator_requests_query(
+        repo="codefromkarl/stardrifter",
+        epic_issue_number=13,
+        include_closed=False,
+    )
+
+    assert "SELECT repo," in OPERATOR_REQUEST_SELECT_SQL
+    assert "FROM operator_request" in OPERATOR_REQUEST_SELECT_SQL
+    assert "WHERE repo = %s AND epic_issue_number = %s AND status = 'open'" in sql
+    assert "ORDER BY opened_at ASC, id ASC" in sql
+    assert params == ("codefromkarl/stardrifter", 13)
+
+
+def test_postgres_claim_helpers_preserve_skip_locked_contract():
+    from taskplane.repository._postgres_claims import (
+        CLAIM_READY_WORK_ITEM_SQL,
+        build_claim_ready_work_item_params,
+    )
+
+    params = build_claim_ready_work_item_params(
+        work_id="task-2",
+        worker_name="worker-a",
+        workspace_path="/tmp/task-2",
+        branch_name="task/2-safe-cleanup",
+        claimed_paths=("src/stardrifter_engine/projections/",),
+        lease_token="lease-123",
+        lease_expires_at="2026-04-06T00:00:00+00:00",
+    )
+
+    assert "FOR UPDATE SKIP LOCKED" in CLAIM_READY_WORK_ITEM_SQL
+    assert "INSERT INTO work_claim" in CLAIM_READY_WORK_ITEM_SQL
+    assert "jsonb_array_elements_text" in CLAIM_READY_WORK_ITEM_SQL
+    assert params[:4] == (
+        "task-2",
+        "worker-a",
+        "/tmp/task-2",
+        "task/2-safe-cleanup",
+    )
+    assert params[4] == "lease-123"
+    assert params[5] == "2026-04-06T00:00:00+00:00"
+    assert params[6] == '["src/stardrifter_engine/projections/"]'
+
+
+def test_postgres_governance_helpers_preserve_propagation_sql_contract():
+    from taskplane.repository._postgres_governance import (
+        SET_PROGRAM_EPIC_EXECUTION_STATUS_SQL,
+        SET_PROGRAM_EPIC_EXECUTION_STATUS_WITH_PROPAGATION_SQL,
+        SET_PROGRAM_STORY_EXECUTION_STATUS_SQL,
+        SET_PROGRAM_STORY_EXECUTION_STATUS_WITH_PROPAGATION_SQL,
+        build_epic_status_with_propagation_params,
+        build_story_status_with_propagation_params,
+    )
+
+    epic_params = build_epic_status_with_propagation_params(
+        repo="codefromkarl/stardrifter",
+        issue_number=18,
+        execution_status="active",
+    )
+    story_params = build_story_status_with_propagation_params(
+        repo="codefromkarl/stardrifter",
+        issue_number=41,
+        execution_status="done",
+    )
+
+    assert "UPDATE program_epic" in SET_PROGRAM_EPIC_EXECUTION_STATUS_SQL
+    assert "WITH direct_storys AS" in SET_PROGRAM_EPIC_EXECUTION_STATUS_WITH_PROPAGATION_SQL
+    assert "UPDATE program_story" in SET_PROGRAM_STORY_EXECUTION_STATUS_SQL
+    assert "WITH current_story AS" in SET_PROGRAM_STORY_EXECUTION_STATUS_WITH_PROPAGATION_SQL
+    assert epic_params == (
+        "codefromkarl/stardrifter",
+        18,
+        "codefromkarl/stardrifter",
+        "codefromkarl/stardrifter",
+        "active",
+        "active",
+        "active",
+        "active",
+        "codefromkarl/stardrifter",
+    )
+    assert story_params == (
+        "codefromkarl/stardrifter",
+        41,
+        41,
+        "codefromkarl/stardrifter",
+        "codefromkarl/stardrifter",
+        "codefromkarl/stardrifter",
+        "done",
+        "done",
+        "codefromkarl/stardrifter",
+    )
+
+
+def test_postgres_promotion_helpers_normalize_and_preserve_review_update_contract():
+    from taskplane.repository._postgres_promotion import (
+        UPDATE_INTENT_PROMOTION_SQL,
+        normalize_promotion_payload,
+    )
+
+    epic_payload, stories_payload = normalize_promotion_payload(
+        {
+            "epic": {
+                "title": "Auth",
+                "lane": "Lane 01",
+            },
+            "stories": [
+                {
+                    "story_key": "S1",
+                    "title": "Backend auth",
+                    "tasks": [
+                        {
+                            "title": "Implement login endpoint",
+                            "planned_paths": ["src/auth.py"],
+                        }
+                    ],
+                },
+                "ignored-non-dict",
+            ],
+        }
+    )
+
+    assert epic_payload == {"title": "Auth", "lane": "Lane 01"}
+    assert stories_payload == [
+        {
+            "story_key": "S1",
+            "title": "Backend auth",
+            "tasks": [
+                {
+                    "title": "Implement login endpoint",
+                    "planned_paths": ["src/auth.py"],
+                }
+            ],
+        }
+    ]
+    assert "UPDATE natural_language_intent" in UPDATE_INTENT_PROMOTION_SQL
+    assert "reviewed_at = NOW()" in UPDATE_INTENT_PROMOTION_SQL
+    assert "review_action = 'approve'" in UPDATE_INTENT_PROMOTION_SQL
+
+
 def test_in_memory_repository_closes_operator_request_and_hides_it_by_default():
     opened_at = datetime(2026, 3, 1, 14, 30, tzinfo=timezone.utc)
     repository = InMemoryControlPlaneRepository(
@@ -1205,6 +1567,105 @@ def test_in_memory_repository_closes_operator_request_and_hides_it_by_default():
         repo="codefromkarl/stardrifter",
         include_closed=True,
     ) == [closed]
+
+
+def test_in_memory_repository_creates_ad_hoc_work_item_ready_for_shadow_capture():
+    repository = InMemoryControlPlaneRepository(
+        work_items=[],
+        dependencies=[],
+        targets_by_work_id={},
+    )
+
+    created = repository.create_ad_hoc_work_item(
+        work_id="adhoc-1",
+        repo="codefromkarl/stardrifter",
+        title="shadow captured task",
+        lane="general",
+        wave="Direct",
+        task_type="core_path",
+        blocking_mode="soft",
+        planned_paths=("src/app.py",),
+        metadata={
+            "entry_mode": "shadow_wrap",
+            "executor": "codex",
+        },
+    )
+
+    assert created == WorkItem(
+        id="adhoc-1",
+        repo="codefromkarl/stardrifter",
+        title="shadow captured task",
+        lane="general",
+        wave="Direct",
+        status="ready",
+        task_type="core_path",
+        blocking_mode="soft",
+        planned_paths=("src/app.py",),
+    )
+    assert repository.get_work_item("adhoc-1") == created
+
+
+def test_postgres_repository_creates_ad_hoc_work_item():
+    connection = FakeConnection(
+        fetchone_results=[
+            {
+                "id": "adhoc-1",
+                "repo": "codefromkarl/stardrifter",
+                "title": "shadow captured task",
+                "lane": "general",
+                "wave": "Direct",
+                "status": "ready",
+                "complexity": "low",
+                "attempt_count": 0,
+                "last_failure_reason": None,
+                "next_eligible_at": None,
+                "source_issue_number": None,
+                "canonical_story_issue_number": None,
+                "task_type": "core_path",
+                "blocking_mode": "soft",
+                "blocked_reason": None,
+                "decision_required": False,
+                "dod_json": {
+                    "story_issue_numbers": [],
+                    "related_story_issue_numbers": [],
+                    "planned_paths": ["src/app.py"],
+                    "entry_mode": "shadow_wrap",
+                    "executor": "codex",
+                },
+            }
+        ]
+    )
+    repository = PostgresControlPlaneRepository(connection)
+
+    created = repository.create_ad_hoc_work_item(
+        work_id="adhoc-1",
+        repo="codefromkarl/stardrifter",
+        title="shadow captured task",
+        lane="general",
+        wave="Direct",
+        task_type="core_path",
+        blocking_mode="soft",
+        planned_paths=("src/app.py",),
+        metadata={
+            "entry_mode": "shadow_wrap",
+            "executor": "codex",
+        },
+    )
+
+    assert created == WorkItem(
+        id="adhoc-1",
+        repo="codefromkarl/stardrifter",
+        title="shadow captured task",
+        lane="general",
+        wave="Direct",
+        status="ready",
+        task_type="core_path",
+        blocking_mode="soft",
+        planned_paths=("src/app.py",),
+    )
+    executed_sql = "\n".join(connection.executed_sql)
+    assert "INSERT INTO work_item" in executed_sql
+    assert "RETURNING id, repo, title, lane, wave, status" in executed_sql
 
 
 def test_in_memory_repository_close_operator_request_clears_attention_when_last_open_request_closes():
@@ -1381,6 +1842,78 @@ def test_postgres_repository_closes_operator_request_and_filters_closed_rows():
     assert "closed_at = NOW()" in executed_sql
     assert "closed_reason = %s" in executed_sql
     assert "status = 'open'" in executed_sql
+
+
+def test_postgres_repository_finalize_work_attempt_stages_status_update_then_followups(
+    monkeypatch,
+):
+    repository = PostgresControlPlaneRepository(FakeConnection())
+    calls: list[tuple[str, Any]] = []
+
+    monkeypatch.setattr(
+        repository,
+        "_apply_finalization_status_update",
+        lambda **kwargs: calls.append(("status", kwargs)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        repository,
+        "_record_finalization_followups",
+        lambda **kwargs: calls.append(("followups", kwargs)),
+        raising=False,
+    )
+
+    execution_run = ExecutionRun(
+        work_id="issue-41",
+        worker_name="worker-a",
+        status="done",
+        summary="completed",
+    )
+
+    repository.finalize_work_attempt(
+        work_id="issue-41",
+        status="done",
+        execution_run=execution_run,
+        blocked_reason=None,
+        decision_required=False,
+        attempt_count=2,
+        last_failure_reason=None,
+        next_eligible_at=None,
+        verification=None,
+        commit_link={
+            "work_id": "issue-41",
+            "repo": "demo/repo",
+            "issue_number": 41,
+            "commit_sha": "abc123",
+            "commit_message": "done",
+        },
+        pull_request_link={
+            "work_id": "issue-41",
+            "repo": "demo/repo",
+            "issue_number": 41,
+            "pull_number": 7,
+            "pull_url": "https://example.invalid/pr/7",
+        },
+    )
+
+    assert [stage for stage, _payload in calls] == ["status", "followups"]
+    assert calls[0][1]["work_id"] == "issue-41"
+    assert calls[0][1]["status"] == "done"
+    assert calls[1][1]["execution_run"] == execution_run
+    assert calls[1][1]["commit_link"] == {
+        "work_id": "issue-41",
+        "repo": "demo/repo",
+        "issue_number": 41,
+        "commit_sha": "abc123",
+        "commit_message": "done",
+    }
+    assert calls[1][1]["pull_request_link"] == {
+        "work_id": "issue-41",
+        "repo": "demo/repo",
+        "issue_number": 41,
+        "pull_number": 7,
+        "pull_url": "https://example.invalid/pr/7",
+    }
 
 
 def test_in_memory_repository_claim_ready_work_item_records_claim_atomically():

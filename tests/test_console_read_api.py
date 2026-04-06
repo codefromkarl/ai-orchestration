@@ -16,7 +16,7 @@ from taskplane import _console_api_internal
 from taskplane import _console_api_tasks
 from taskplane import _console_api_repo_jobs
 from taskplane import _console_api_stories
-from taskplane.contextweaver_indexing import (
+from taskplane.contextatlas_indexing import (
     CheckoutAliasRecord,
     FileIndexRegistry,
     IndexArtifactRecord,
@@ -1004,7 +1004,7 @@ def test_get_repo_summary_formats_status_count_queries_with_real_table_name():
 def test_get_repo_summary_includes_snapshot_health_from_registry(monkeypatch, tmp_path):
     registry_path = tmp_path / "registry.json"
     registry = FileIndexRegistry(registry_path)
-    monkeypatch.setenv("TASKPLANE_CONTEXTWEAVER_REGISTRY_PATH", str(registry_path))
+    monkeypatch.setenv("TASKPLANE_CONTEXTATLAS_REGISTRY_PATH", str(registry_path))
     registry.upsert_artifact(
         IndexArtifactRecord(
             repository_id="control:codefromkarl/stardrifter",
@@ -1753,6 +1753,65 @@ def test_get_epic_detail_integration_returns_stories_active_tasks_and_running_jo
     assert len(payload["running_jobs"]) == 1
     assert payload["running_jobs"][0]["story_issue_number"] == story_issue_number
     assert payload["execution_state"]["status"] == "active"
+
+
+@pytest.mark.usefixtures("postgres_test_db")
+def test_get_epic_detail_integration_returns_open_operator_requests(
+    postgres_test_db: str,
+):
+    repo = f"codefromkarl/stardrifter-epic-request-{uuid4().hex[:8]}"
+    epic_issue_number = 7713
+
+    with psycopg.connect(
+        postgres_test_db, row_factory=cast(Any, dict_row)
+    ) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO program_epic (
+                    repo, issue_number, title, lane, program_status, execution_status, active_wave, notes
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    repo,
+                    epic_issue_number,
+                    "Epic With Operator Request",
+                    "Lane 77",
+                    "approved",
+                    "active",
+                    "wave-7",
+                    None,
+                ),
+            )
+            cursor.execute(
+                """
+                INSERT INTO operator_request (
+                    repo, epic_issue_number, reason_code, summary,
+                    remaining_story_issue_numbers_json, blocked_story_issue_numbers_json,
+                    status, opened_at
+                ) VALUES (%s, %s, %s, %s, %s::jsonb, %s::jsonb, 'open', NOW())
+                """,
+                (
+                    repo,
+                    epic_issue_number,
+                    "progress_timeout",
+                    "Epic #7713 needs operator acknowledgement.",
+                    "[7714]",
+                    "[]",
+                ),
+            )
+        connection.commit()
+
+    with psycopg.connect(
+        postgres_test_db, row_factory=cast(Any, dict_row)
+    ) as connection:
+        payload = get_epic_detail(
+            connection, repo=repo, epic_issue_number=epic_issue_number
+        )
+
+    assert len(payload["operator_requests"]) == 1
+    assert payload["operator_requests"][0]["reason_code"] == "progress_timeout"
+    assert payload["operator_requests"][0]["status"] == "open"
 
 
 @pytest.mark.usefixtures("postgres_test_db")

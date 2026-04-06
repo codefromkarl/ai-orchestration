@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..models import OperatorRequest, ProgramStory, WorkClaim, WorkItem
+from ..models import NaturalLanguageIntent, OperatorRequest, ProgramStory, WorkClaim, WorkItem
 
 
 def value(row: Any, key: str) -> Any:
@@ -112,4 +112,32 @@ def row_to_operator_request(row: Any) -> OperatorRequest:
         opened_at=value_optional(row, "opened_at"),
         closed_at=value_optional(row, "closed_at"),
         closed_reason=value_optional(row, "closed_reason"),
+    )
+
+
+
+def row_to_natural_language_intent(row: Any) -> NaturalLanguageIntent:
+    return NaturalLanguageIntent(
+        id=str(value(row, "id")),
+        repo=value(row, "repo"),
+        prompt=value(row, "prompt"),
+        status=value(row, "status"),
+        conversation=tuple(
+            item for item in _json_list(row, "conversation_json") if isinstance(item, dict)
+        ),
+        summary=str(value_optional(row, "summary") or ""),
+        clarification_questions=tuple(
+            str(item) for item in _json_list(row, "clarification_questions_json")
+        ),
+        proposal_json=value_optional(row, "proposal_json") or {},
+        analysis_model=value_optional(row, "analysis_model"),
+        promoted_epic_issue_number=value_optional(row, "promoted_epic_issue_number"),
+        created_at=value_optional(row, "created_at"),
+        updated_at=value_optional(row, "updated_at"),
+        approved_at=value_optional(row, "approved_at"),
+        approved_by=value_optional(row, "approved_by"),
+        reviewed_at=value_optional(row, "reviewed_at"),
+        reviewed_by=value_optional(row, "reviewed_by"),
+        review_action=value_optional(row, "review_action"),
+        review_feedback=value_optional(row, "review_feedback"),
     )

@@ -20,8 +20,10 @@ from .repository import (
     ExecutionRepository,
     InMemoryControlPlaneRepository,
     PostgresControlPlaneRepository,
+    ReadyStateSyncRepository,
     StoryDecompositionRepository,
     StoryRepository,
+    SupervisorSchedulingRepository,
     WorkerRepository,
     WorkStateRepository,
     _claim_has_path_conflict,
@@ -35,6 +37,7 @@ from .models import REQUEUE_BACKOFF
 
 __all__ = [
     "WorkStateRepository",
+    "ReadyStateSyncRepository",
     "ClaimRepository",
     "ExecutionRepository",
     "WorkerRepository",
@@ -42,6 +45,7 @@ __all__ = [
     "EpicRepository",
     "StoryDecompositionRepository",
     "EpicDecompositionRepository",
+    "SupervisorSchedulingRepository",
     "ControlPlaneRepository",
     "InMemoryControlPlaneRepository",
     "PostgresControlPlaneRepository",

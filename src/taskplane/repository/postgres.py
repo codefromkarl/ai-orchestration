@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import re
 import secrets
-from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -18,6 +17,7 @@ from ..models import (
     EpicExecutionState,
     ExecutionRun,
     GuardrailViolation,
+    NaturalLanguageIntent,
     OperatorRequest,
     ProgramStory,
     QueueEvaluation,
@@ -32,7 +32,37 @@ from ..models import (
     WorkStatus,
     WorkTarget,
 )
+from ._postgres_execution import (
+    apply_finalization_status_update,
+    record_finalization_followups,
+)
+from ._postgres_claims import (
+    CLAIM_READY_WORK_ITEM_SQL,
+    build_claim_ready_work_item_params,
+)
+from ._postgres_governance import (
+    SET_PROGRAM_EPIC_EXECUTION_STATUS_SQL,
+    SET_PROGRAM_EPIC_EXECUTION_STATUS_WITH_PROPAGATION_SQL,
+    SET_PROGRAM_STORY_EXECUTION_STATUS_SQL,
+    SET_PROGRAM_STORY_EXECUTION_STATUS_WITH_PROPAGATION_SQL,
+    build_epic_status_with_propagation_params,
+    build_story_status_with_propagation_params,
+)
+from ._postgres_intake import (
+    RECORD_NATURAL_LANGUAGE_INTENT_SQL,
+    build_get_natural_language_intent_query,
+    build_list_natural_language_intents_query,
+    build_record_natural_language_intent_params,
+)
+from ._postgres_operator_requests import (
+    CLOSE_OPERATOR_REQUEST_SQL,
+    RECORD_OPERATOR_REQUEST_SQL,
+    build_list_operator_requests_query,
+    build_record_operator_request_params,
+)
+from ._postgres_promotion import promote_intent_proposal_via_cursor
 from ._postgres_row_mapping import (
+    row_to_natural_language_intent,
     row_to_operator_request,
     row_to_program_story,
     row_to_work_claim,
@@ -42,6 +72,8 @@ from ._postgres_row_mapping import (
 )
 
 LEASE_DURATION = timedelta(minutes=15)
+INTAKE_EPIC_START = 1_500_000_000
+INTAKE_STORY_START = 1_600_000_000
 
 
 class PostgresControlPlaneRepository:
@@ -77,6 +109,76 @@ class PostgresControlPlaneRepository:
             )
             rows = cursor.fetchall()
         return [self._row_to_work_item(row) for row in rows]
+
+    def create_ad_hoc_work_item(
+        self,
+        *,
+        work_id: str,
+        repo: str,
+        title: str,
+        lane: str = "general",
+        wave: str = "Direct",
+        task_type: str = "core_path",
+        blocking_mode: str = "soft",
+        planned_paths: tuple[str, ...] = (),
+        metadata: dict[str, Any] | None = None,
+    ) -> WorkItem:
+        dod_payload = {
+            "story_issue_numbers": [],
+            "related_story_issue_numbers": [],
+            "planned_paths": list(planned_paths),
+        }
+        if metadata:
+            dod_payload.update(metadata)
+
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO work_item (
+                    id,
+                    repo,
+                    title,
+                    lane,
+                    wave,
+                    status,
+                    task_type,
+                    blocking_mode,
+                    dod_json
+                )
+                VALUES (%s, %s, %s, %s, %s, 'ready', %s, %s, %s::jsonb)
+                ON CONFLICT (id) DO UPDATE SET
+                    repo = EXCLUDED.repo,
+                    title = EXCLUDED.title,
+                    lane = EXCLUDED.lane,
+                    wave = EXCLUDED.wave,
+                    status = 'ready',
+                    task_type = EXCLUDED.task_type,
+                    blocking_mode = EXCLUDED.blocking_mode,
+                    dod_json = EXCLUDED.dod_json,
+                    blocked_reason = NULL,
+                    decision_required = FALSE,
+                    updated_at = NOW()
+                RETURNING id, repo, title, lane, wave, status, complexity,
+                          attempt_count, last_failure_reason, next_eligible_at,
+                          source_issue_number, dod_json, canonical_story_issue_number,
+                          task_type, blocking_mode, blocked_reason, decision_required
+                """,
+                (
+                    work_id,
+                    repo,
+                    title,
+                    lane,
+                    wave,
+                    task_type,
+                    blocking_mode,
+                    json.dumps(dod_payload, ensure_ascii=False),
+                ),
+            )
+            row = cursor.fetchone()
+        self._connection.commit()
+        if row is None:
+            raise RuntimeError(f"failed to create ad hoc work item: {work_id}")
+        return self._row_to_work_item(row)
 
     def list_work_claims(self) -> list[WorkClaim]:
         with self._connection.cursor() as cursor:
@@ -178,12 +280,7 @@ class PostgresControlPlaneRepository:
     ) -> None:
         with self._connection.cursor() as cursor:
             cursor.execute(
-                """
-                UPDATE program_epic
-                SET execution_status = %s,
-                    updated_at = NOW()
-                WHERE repo = %s AND issue_number = %s
-                """,
+                SET_PROGRAM_EPIC_EXECUTION_STATUS_SQL,
                 (execution_status, repo, issue_number),
             )
         self._connection.commit()
@@ -193,74 +290,15 @@ class PostgresControlPlaneRepository:
     ) -> None:
         with self._connection.cursor() as cursor:
             cursor.execute(
-                """
-                UPDATE program_epic
-                SET execution_status = %s,
-                    updated_at = NOW()
-                WHERE repo = %s AND issue_number = %s
-                """,
+                SET_PROGRAM_EPIC_EXECUTION_STATUS_SQL,
                 (execution_status, repo, issue_number),
             )
             cursor.execute(
-                """
-                WITH direct_storys AS (
-                    SELECT ps.issue_number
-                    FROM program_story ps
-                    WHERE ps.repo = %s
-                      AND ps.epic_issue_number = %s
-                ),
-                dependency_state AS (
-                    SELECT
-                        ds.issue_number,
-                        COUNT(psd.depends_on_story_issue_number) AS dependency_count,
-                        COUNT(*) FILTER (
-                            WHERE dep.execution_status NOT IN ('active', 'done')
-                        ) AS unmet_dependencies
-                    FROM direct_storys ds
-                    LEFT JOIN program_story_dependency psd
-                      ON psd.repo = %s
-                     AND psd.story_issue_number = ds.issue_number
-                    LEFT JOIN program_story dep
-                      ON dep.repo = psd.repo
-                     AND dep.issue_number = psd.depends_on_story_issue_number
-                    GROUP BY ds.issue_number
-                ),
-                task_counts AS (
-                    SELECT
-                        ds.issue_number,
-                        COUNT(wi.id) AS task_count
-                    FROM direct_storys ds
-                    LEFT JOIN work_item wi
-                      ON wi.repo = %s
-                     AND wi.canonical_story_issue_number = ds.issue_number
-                    GROUP BY ds.issue_number
-                )
-                UPDATE program_story ps
-                SET execution_status = CASE
-                        WHEN %s = 'active' AND ds.unmet_dependencies = 0 AND tc.task_count > 0 THEN 'active'::execution_status
-                        WHEN %s = 'active' AND ds.unmet_dependencies = 0 THEN 'decomposing'::execution_status
-                        WHEN %s = 'active' THEN 'gated'::execution_status
-                        ELSE %s::execution_status
-                    END,
-                    updated_at = NOW()
-                FROM dependency_state ds
-                JOIN task_counts tc
-                  ON tc.issue_number = ds.issue_number
-                WHERE ps.repo = %s
-                  AND ps.issue_number = ds.issue_number
-                """,
-                (
-                    repo,
-                    issue_number,
-                    repo,
-                    repo,
-                    execution_status,
-                    execution_status,
-                    execution_status,
-                    "backlog"
-                    if execution_status in {"backlog", "planned"}
-                    else execution_status,
-                    repo,
+                SET_PROGRAM_EPIC_EXECUTION_STATUS_WITH_PROPAGATION_SQL,
+                build_epic_status_with_propagation_params(
+                    repo=repo,
+                    issue_number=issue_number,
+                    execution_status=execution_status,
                 ),
             )
         self._connection.commit()
@@ -270,12 +308,7 @@ class PostgresControlPlaneRepository:
     ) -> None:
         with self._connection.cursor() as cursor:
             cursor.execute(
-                """
-                UPDATE program_story
-                SET execution_status = %s,
-                    updated_at = NOW()
-                WHERE repo = %s AND issue_number = %s
-                """,
+                SET_PROGRAM_STORY_EXECUTION_STATUS_SQL,
                 (execution_status, repo, issue_number),
             )
         self._connection.commit()
@@ -285,80 +318,15 @@ class PostgresControlPlaneRepository:
     ) -> None:
         with self._connection.cursor() as cursor:
             cursor.execute(
-                """
-                UPDATE program_story
-                SET execution_status = %s,
-                    updated_at = NOW()
-                WHERE repo = %s AND issue_number = %s
-                """,
+                SET_PROGRAM_STORY_EXECUTION_STATUS_SQL,
                 (execution_status, repo, issue_number),
             )
             cursor.execute(
-                """
-                WITH current_story AS (
-                    SELECT epic_issue_number
-                    FROM program_story
-                    WHERE repo = %s AND issue_number = %s
-                ),
-                sibling_storys AS (
-                    SELECT ps.issue_number
-                    FROM program_story ps
-                    JOIN current_story cs ON cs.epic_issue_number = ps.epic_issue_number
-                    JOIN program_story_dependency psd
-                      ON psd.repo = ps.repo
-                     AND psd.story_issue_number = ps.issue_number
-                     AND psd.depends_on_story_issue_number = %s
-                    WHERE ps.repo = %s
-                      AND ps.program_status = 'approved'
-                ),
-                dependency_state AS (
-                    SELECT
-                        ss.issue_number,
-                        COUNT(*) FILTER (
-                            WHERE dep.execution_status NOT IN ('active', 'done')
-                        ) AS unmet_dependencies
-                    FROM sibling_storys ss
-                    JOIN program_story_dependency psd
-                      ON psd.repo = %s
-                     AND psd.story_issue_number = ss.issue_number
-                    JOIN program_story dep
-                      ON dep.repo = psd.repo
-                     AND dep.issue_number = psd.depends_on_story_issue_number
-                    GROUP BY ss.issue_number
-                ),
-                task_counts AS (
-                    SELECT
-                        ss.issue_number,
-                        COUNT(wi.id) AS task_count
-                    FROM sibling_storys ss
-                    LEFT JOIN work_item wi
-                      ON wi.repo = %s
-                     AND wi.canonical_story_issue_number = ss.issue_number
-                    GROUP BY ss.issue_number
-                )
-                UPDATE program_story ps
-                SET execution_status = CASE
-                        WHEN %s = 'done' AND ds.unmet_dependencies = 0 AND tc.task_count > 0 THEN 'active'::execution_status
-                        WHEN %s = 'done' AND ds.unmet_dependencies = 0 THEN 'decomposing'::execution_status
-                        ELSE ps.execution_status
-                    END,
-                    updated_at = NOW()
-                FROM dependency_state ds
-                JOIN task_counts tc
-                  ON tc.issue_number = ds.issue_number
-                WHERE ps.repo = %s
-                  AND ps.issue_number = ds.issue_number
-                """,
-                (
-                    repo,
-                    issue_number,
-                    issue_number,
-                    repo,
-                    repo,
-                    repo,
-                    execution_status,
-                    execution_status,
-                    repo,
+                SET_PROGRAM_STORY_EXECUTION_STATUS_WITH_PROPAGATION_SQL,
+                build_story_status_with_propagation_params(
+                    repo=repo,
+                    issue_number=issue_number,
+                    execution_status=execution_status,
                 ),
             )
         self._connection.commit()
@@ -409,132 +377,143 @@ class PostgresControlPlaneRepository:
 
     def sync_ready_states(self) -> None:
         with self._connection.cursor() as cursor:
-            # Step 1: Return in-progress items to pending if no active claim
-            cursor.execute(
-                """
-                UPDATE work_item wi
-                SET status = 'pending'::work_status,
-                    updated_at = NOW()
-                WHERE wi.status = 'in_progress'
-                  AND NOT EXISTS (
-                      SELECT 1
-                      FROM work_claim wc
-                      WHERE wc.work_id = wi.id
-                        AND (wc.lease_expires_at IS NULL OR wc.lease_expires_at > NOW())
-                  )
-                """
-            )
-
-            # Step 2: Auto-repair missing repo from program_story
-            # Repairs data before blocking, reducing manual intervention
-            cursor.execute(
-                """
-                UPDATE work_item wi
-                SET repo = ps.repo,
-                    updated_at = NOW()
-                FROM program_story ps
-                WHERE wi.canonical_story_issue_number = ps.issue_number
-                  AND wi.repo IS NULL
-                  AND ps.repo IS NOT NULL
-                """
-            )
-
-            # Step 3: Auto-repair missing/unassigned wave from parent Epic/Story
-            cursor.execute(
-                """
-                UPDATE work_item wi
-                SET wave = COALESCE(pe.active_wave, ps.active_wave, 'Wave0'),
-                    updated_at = NOW()
-                FROM program_story ps
-                JOIN program_epic pe ON pe.issue_number = ps.epic_issue_number
-                                     AND pe.repo = ps.repo
-                WHERE wi.canonical_story_issue_number = ps.issue_number
-                  AND wi.repo = ps.repo
-                  AND (wi.wave IS NULL OR wi.wave = 'unassigned')
-                """
-            )
-
-            # Step 4: Block work items with data integrity issues (after repair attempt)
-            # These items cannot be executed until their data is fixed
-            cursor.execute(
-                """
-                UPDATE work_item wi
-                SET status = 'blocked'::work_status,
-                    blocked_reason = 'data_integrity_issue: ' ||
-                        CASE
-                            WHEN wi.repo IS NULL AND wi.canonical_story_issue_number IS NOT NULL
-                                THEN 'missing_repo'
-                            WHEN wi.wave IS NULL THEN 'missing_wave'
-                            ELSE 'unknown'
-                        END,
-                    updated_at = NOW()
-                WHERE wi.status IN ('pending', 'ready')
-                  AND (
-                      (wi.repo IS NULL AND wi.canonical_story_issue_number IS NOT NULL)
-                      OR wi.wave IS NULL
-                  )
-                """
-            )
-
-            # Step 5: Evaluate readiness for items that pass integrity checks
-            cursor.execute(
-                """
-                WITH ready_eval AS (
-                    SELECT
-                        wi.id,
-                        (
-                            (wi.next_eligible_at IS NULL OR wi.next_eligible_at <= NOW())
-                            AND
-                            (
-                                wi.canonical_story_issue_number IS NULL
-                                OR EXISTS (
-                                    SELECT 1
-                                    FROM program_story current_story
-                                    WHERE current_story.repo = wi.repo
-                                      AND current_story.issue_number = wi.canonical_story_issue_number
-                                      AND current_story.execution_status IN ('active', 'done')
-                                )
-                            )
-                            AND
-                            NOT EXISTS (
-                                SELECT 1
-                                FROM work_dependency wd
-                                JOIN work_item dep ON dep.id = wd.depends_on_work_id
-                                WHERE wd.work_id = wi.id
-                                  AND dep.status <> 'done'
-                                  AND dep.blocking_mode = 'hard'
-                            )
-                            AND NOT EXISTS (
-                                SELECT 1
-                                FROM story_dependency sd
-                                JOIN program_story dep_story
-                                  ON dep_story.repo = wi.repo
-                                 AND dep_story.issue_number = sd.depends_on_story_issue_number
-                                WHERE wi.canonical_story_issue_number = sd.story_issue_number
-                                  AND dep_story.execution_status <> 'done'
-                            )
-                        ) AS is_ready
-                    FROM work_item wi
-                    WHERE wi.status IN ('pending', 'ready')
-                      -- Data integrity pre-check: skip items with known issues
-                      AND wi.repo IS NOT NULL
-                      AND wi.wave IS NOT NULL
-                )
-                UPDATE work_item wi
-                SET status = CASE
-                        WHEN ready_eval.is_ready THEN 'ready'::work_status
-                        ELSE 'pending'::work_status
-                    END,
-                    updated_at = NOW()
-                FROM ready_eval
-                WHERE wi.id = ready_eval.id
-                  AND (
-                    (wi.status = 'pending' AND ready_eval.is_ready)
-                    OR (wi.status = 'ready' AND NOT ready_eval.is_ready)
-                  )
-                """
-            )
+            self._repair_or_recover_ready_state_inputs(cursor)
+            ready_ids = self._derive_ready_candidate_ids(cursor)
+            self._apply_ready_state_transitions(cursor, ready_ids)
         self._connection.commit()
+
+    def _repair_or_recover_ready_state_inputs(self, cursor: Any) -> None:
+        cursor.execute(
+            """
+            UPDATE work_item wi
+            SET status = 'pending'::work_status,
+                updated_at = NOW()
+            WHERE wi.status = 'in_progress'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM work_claim wc
+                  WHERE wc.work_id = wi.id
+                    AND (wc.lease_expires_at IS NULL OR wc.lease_expires_at > NOW())
+              )
+            """
+        )
+        cursor.execute(
+            """
+            UPDATE work_item wi
+            SET repo = ps.repo,
+                updated_at = NOW()
+            FROM program_story ps
+            WHERE wi.canonical_story_issue_number = ps.issue_number
+              AND wi.repo IS NULL
+              AND ps.repo IS NOT NULL
+            """
+        )
+        cursor.execute(
+            """
+            UPDATE work_item wi
+            SET wave = COALESCE(pe.active_wave, ps.active_wave, 'Wave0'),
+                updated_at = NOW()
+            FROM program_story ps
+            JOIN program_epic pe ON pe.issue_number = ps.epic_issue_number
+                                 AND pe.repo = ps.repo
+            WHERE wi.canonical_story_issue_number = ps.issue_number
+              AND wi.repo = ps.repo
+              AND (wi.wave IS NULL OR wi.wave = 'unassigned')
+            """
+        )
+        cursor.execute(
+            """
+            UPDATE work_item wi
+            SET status = 'blocked'::work_status,
+                blocked_reason = 'data_integrity_issue: ' ||
+                    CASE
+                        WHEN wi.repo IS NULL AND wi.canonical_story_issue_number IS NOT NULL
+                            THEN 'missing_repo'
+                        WHEN wi.wave IS NULL THEN 'missing_wave'
+                        ELSE 'unknown'
+                    END,
+                updated_at = NOW()
+            WHERE wi.status IN ('pending', 'ready')
+              AND (
+                  (wi.repo IS NULL AND wi.canonical_story_issue_number IS NOT NULL)
+                  OR wi.wave IS NULL
+              )
+            """
+        )
+
+    def _derive_ready_candidate_ids(self, cursor: Any) -> set[str]:
+        cursor.execute(
+            """
+            SELECT wi.id
+            FROM work_item wi
+            WHERE wi.status IN ('pending', 'ready')
+              AND wi.repo IS NOT NULL
+              AND wi.wave IS NOT NULL
+              AND (wi.next_eligible_at IS NULL OR wi.next_eligible_at <= NOW())
+              AND (
+                    wi.canonical_story_issue_number IS NULL
+                    OR EXISTS (
+                        SELECT 1
+                        FROM program_story current_story
+                        WHERE current_story.repo = wi.repo
+                          AND current_story.issue_number = wi.canonical_story_issue_number
+                          AND current_story.execution_status IN ('active', 'done')
+                    )
+              )
+              AND NOT EXISTS (
+                    SELECT 1
+                    FROM work_dependency wd
+                    JOIN work_item dep ON dep.id = wd.depends_on_work_id
+                    WHERE wd.work_id = wi.id
+                      AND dep.status <> 'done'
+                      AND dep.blocking_mode = 'hard'
+              )
+              AND NOT EXISTS (
+                    SELECT 1
+                    FROM story_dependency sd
+                    JOIN program_story dep_story
+                      ON dep_story.repo = wi.repo
+                     AND dep_story.issue_number = sd.depends_on_story_issue_number
+                    WHERE wi.canonical_story_issue_number = sd.story_issue_number
+                      AND dep_story.execution_status <> 'done'
+              )
+              AND NOT EXISTS (
+                    SELECT 1
+                    FROM execution_session es
+                    WHERE es.work_id = wi.id
+                      AND es.status IN ('suspended', 'waiting_internal', 'waiting_external')
+              )
+            """
+        )
+        rows = cursor.fetchall()
+        return {
+            str(self._value(row, "id"))
+            for row in rows
+            if self._value(row, "id") is not None
+        }
+
+    def _apply_ready_state_transitions(
+        self, cursor: Any, ready_ids: set[str]
+    ) -> None:
+        ready_id_list = sorted(ready_ids)
+        cursor.execute(
+            """
+            UPDATE work_item wi
+            SET status = CASE
+                    WHEN wi.id = ANY(%s::text[]) THEN 'ready'::work_status
+                    ELSE 'pending'::work_status
+                END,
+                updated_at = NOW()
+            WHERE wi.status IN ('pending', 'ready')
+              AND wi.repo IS NOT NULL
+              AND wi.wave IS NOT NULL
+              AND (
+                    (wi.status = 'pending' AND wi.id = ANY(%s::text[]))
+                    OR (wi.status = 'ready' AND NOT (wi.id = ANY(%s::text[])))
+              )
+            """,
+            (ready_id_list, ready_id_list, ready_id_list),
+        )
 
     def claim_ready_work_item(
         self,
@@ -553,88 +532,15 @@ class PostgresControlPlaneRepository:
                 f"SET LOCAL application_name = 'claim_ready_work_item:{safe_worker}:{safe_work_id}'"
             )
             cursor.execute(
-                """
-                WITH claim_input AS (
-                    SELECT
-                        %s::text AS work_id,
-                        %s::text AS worker_name,
-                        %s::text AS workspace_path,
-                        %s::text AS branch_name,
-                        %s::text AS lease_token,
-                        %s::timestamptz AS lease_expires_at,
-                        %s::jsonb AS claimed_paths
-                ),
-                locked AS (
-                    SELECT wi.id
-                    FROM work_item wi
-                    CROSS JOIN claim_input ci
-                    WHERE wi.id = ci.work_id
-                      AND wi.status = 'ready'
-                      AND NOT EXISTS (
-                          SELECT 1
-                          FROM work_claim wc
-                          CROSS JOIN LATERAL jsonb_array_elements_text(wc.claimed_paths) AS existing(path)
-                          CROSS JOIN LATERAL jsonb_array_elements_text(ci.claimed_paths) AS incoming(path)
-                          WHERE wc.work_id <> ci.work_id
-                            AND (wc.lease_expires_at IS NULL OR wc.lease_expires_at > NOW())
-                            AND (
-                                existing.path = incoming.path
-                                OR existing.path LIKE incoming.path || '/%%'
-                                OR incoming.path LIKE existing.path || '/%%'
-                            )
-                      )
-                    FOR UPDATE SKIP LOCKED
-                ),
-                updated AS (
-                    UPDATE work_item wi
-                    SET status = 'in_progress',
-                        updated_at = NOW()
-                    FROM locked
-                    WHERE wi.id = locked.id
-                    RETURNING wi.id, wi.title, wi.lane, wi.wave, wi.status, wi.complexity,
-                              wi.source_issue_number, wi.dod_json, wi.canonical_story_issue_number,
-                              wi.task_type, wi.blocking_mode, wi.blocked_reason, wi.decision_required
-                ),
-                claim_upsert AS (
-                    INSERT INTO work_claim (
-                        work_id,
-                        worker_name,
-                        workspace_path,
-                        branch_name,
-                        lease_token,
-                        lease_expires_at,
-                        claimed_paths
-                    )
-                    SELECT
-                        ci.work_id,
-                        ci.worker_name,
-                        ci.workspace_path,
-                        ci.branch_name,
-                        ci.lease_token,
-                        ci.lease_expires_at,
-                        ci.claimed_paths
-                    FROM claim_input ci
-                    JOIN updated u ON u.id = ci.work_id
-                    ON CONFLICT (work_id) DO UPDATE SET
-                        worker_name = EXCLUDED.worker_name,
-                        workspace_path = EXCLUDED.workspace_path,
-                        branch_name = EXCLUDED.branch_name,
-                        lease_token = EXCLUDED.lease_token,
-                        lease_expires_at = EXCLUDED.lease_expires_at,
-                        claimed_paths = EXCLUDED.claimed_paths,
-                        claimed_at = NOW()
-                    RETURNING work_id
-                )
-                SELECT * FROM updated
-                """,
-                (
-                    work_id,
-                    worker_name,
-                    workspace_path,
-                    branch_name,
-                    secrets.token_hex(16),
-                    (datetime.now(UTC) + LEASE_DURATION).isoformat(),
-                    json.dumps(list(claimed_paths)),
+                CLAIM_READY_WORK_ITEM_SQL,
+                build_claim_ready_work_item_params(
+                    work_id=work_id,
+                    worker_name=worker_name,
+                    workspace_path=workspace_path,
+                    branch_name=branch_name,
+                    claimed_paths=claimed_paths,
+                    lease_token=secrets.token_hex(16),
+                    lease_expires_at=(datetime.now(UTC) + LEASE_DURATION).isoformat(),
                 ),
             )
             row = cursor.fetchone()
@@ -770,21 +676,41 @@ class PostgresControlPlaneRepository:
             return None
         return int(self._value(row, "id"))
 
-    def list_story_work_item_ids(self, story_issue_number: int) -> list[str]:
+    def list_story_work_item_ids(
+        self, story_issue_number: int, repo: str | None = None
+    ) -> list[str]:
         with self._connection.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT id
-                FROM work_item
-                WHERE canonical_story_issue_number = %s
-                   OR (
-                        canonical_story_issue_number IS NULL
-                    AND COALESCE(dod_json->'story_issue_numbers', '[]'::jsonb) @> %s::jsonb
-                   )
-                ORDER BY source_issue_number, id
-                """,
-                (story_issue_number, json.dumps([story_issue_number])),
-            )
+            if repo is None:
+                cursor.execute(
+                    """
+                    SELECT id
+                    FROM work_item
+                    WHERE canonical_story_issue_number = %s
+                       OR (
+                            canonical_story_issue_number IS NULL
+                        AND COALESCE(dod_json->'story_issue_numbers', '[]'::jsonb) @> %s::jsonb
+                       )
+                    ORDER BY source_issue_number, id
+                    """,
+                    (story_issue_number, json.dumps([story_issue_number])),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT id
+                    FROM work_item
+                    WHERE repo = %s
+                      AND (
+                            canonical_story_issue_number = %s
+                         OR (
+                                canonical_story_issue_number IS NULL
+                            AND COALESCE(dod_json->'story_issue_numbers', '[]'::jsonb) @> %s::jsonb
+                         )
+                      )
+                    ORDER BY source_issue_number, id
+                    """,
+                    (repo, story_issue_number, json.dumps([story_issue_number])),
+                )
             rows = cursor.fetchall()
         return [self._value(row, "id") for row in rows]
 
@@ -1141,34 +1067,8 @@ class PostgresControlPlaneRepository:
     def record_operator_request(self, request: OperatorRequest) -> int | None:
         with self._connection.cursor() as cursor:
             cursor.execute(
-                """
-                INSERT INTO operator_request (
-                    repo,
-                    epic_issue_number,
-                    reason_code,
-                    summary,
-                    remaining_story_issue_numbers_json,
-                    blocked_story_issue_numbers_json,
-                    status,
-                    opened_at,
-                    closed_at,
-                    closed_reason
-                )
-                VALUES (%s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s)
-                RETURNING id
-                """,
-                (
-                    request.repo,
-                    request.epic_issue_number,
-                    request.reason_code,
-                    request.summary,
-                    json.dumps(list(request.remaining_story_issue_numbers)),
-                    json.dumps(list(request.blocked_story_issue_numbers)),
-                    request.status,
-                    request.opened_at,
-                    request.closed_at,
-                    request.closed_reason,
-                ),
+                RECORD_OPERATOR_REQUEST_SQL,
+                build_record_operator_request_params(request),
             )
             row = cursor.fetchone()
         self._connection.commit()
@@ -1181,33 +1081,13 @@ class PostgresControlPlaneRepository:
         epic_issue_number: int | None = None,
         include_closed: bool = False,
     ) -> list[OperatorRequest]:
-        params: tuple[object, ...]
-        where_clauses = ["repo = %s"]
-        params = (repo,)
-        if epic_issue_number is not None:
-            where_clauses.append("epic_issue_number = %s")
-            params = (repo, epic_issue_number)
-        if not include_closed:
-            where_clauses.append("status = 'open'")
+        sql, params = build_list_operator_requests_query(
+            repo=repo,
+            epic_issue_number=epic_issue_number,
+            include_closed=include_closed,
+        )
         with self._connection.cursor() as cursor:
-            cursor.execute(
-                f"""
-                SELECT repo,
-                       epic_issue_number,
-                       reason_code,
-                       summary,
-                       remaining_story_issue_numbers_json,
-                       blocked_story_issue_numbers_json,
-                       status,
-                       opened_at,
-                       closed_at,
-                       closed_reason
-                FROM operator_request
-                WHERE {" AND ".join(where_clauses)}
-                ORDER BY opened_at ASC, id ASC
-                """,
-                params,
-            )
+            cursor.execute(sql, params)
             rows = cursor.fetchall()
         return [self._row_to_operator_request(row) for row in rows]
 
@@ -1221,56 +1101,7 @@ class PostgresControlPlaneRepository:
     ) -> OperatorRequest | None:
         with self._connection.cursor() as cursor:
             cursor.execute(
-                """
-                WITH closed_request AS (
-                    UPDATE operator_request
-                    SET status = 'closed',
-                        closed_at = NOW(),
-                        closed_reason = %s
-                    WHERE repo = %s
-                      AND epic_issue_number = %s
-                      AND reason_code = %s
-                      AND status = 'open'
-                    RETURNING repo,
-                              epic_issue_number,
-                              reason_code,
-                              summary,
-                              remaining_story_issue_numbers_json,
-                              blocked_story_issue_numbers_json,
-                              status,
-                              opened_at,
-                              closed_at,
-                              closed_reason
-                ),
-                synced_epic_state AS (
-                    UPDATE epic_execution_state ees
-                    SET operator_attention_required = EXISTS (
-                            SELECT 1
-                            FROM operator_request orq
-                            JOIN closed_request cr
-                              ON cr.repo = orq.repo
-                             AND cr.epic_issue_number = orq.epic_issue_number
-                            WHERE orq.status = 'open'
-                        ),
-                        last_operator_action_at = cr.closed_at,
-                        last_operator_action_reason = cr.closed_reason,
-                        updated_at = NOW()
-                    FROM closed_request cr
-                    WHERE ees.repo = cr.repo
-                      AND ees.epic_issue_number = cr.epic_issue_number
-                )
-                SELECT repo,
-                       epic_issue_number,
-                       reason_code,
-                       summary,
-                       remaining_story_issue_numbers_json,
-                       blocked_story_issue_numbers_json,
-                       status,
-                       opened_at,
-                       closed_at,
-                       closed_reason
-                FROM closed_request
-                """,
+                CLOSE_OPERATOR_REQUEST_SQL,
                 (closed_reason, repo, epic_issue_number, reason_code),
             )
             row = cursor.fetchone()
@@ -1366,6 +1197,65 @@ class PostgresControlPlaneRepository:
         self._connection.commit()
         return None if row is None else int(self._value(row, "id"))
 
+    def record_natural_language_intent(
+        self, intent: NaturalLanguageIntent
+    ) -> str | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                RECORD_NATURAL_LANGUAGE_INTENT_SQL,
+                build_record_natural_language_intent_params(intent),
+            )
+            row = cursor.fetchone()
+        self._connection.commit()
+        return None if row is None else str(self._value(row, "id"))
+
+    def update_natural_language_intent(self, intent: NaturalLanguageIntent) -> None:
+        self.record_natural_language_intent(intent)
+
+    def get_natural_language_intent(
+        self, intent_id: str
+    ) -> NaturalLanguageIntent | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(build_get_natural_language_intent_query(), (intent_id,))
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        return row_to_natural_language_intent(row)
+
+    def list_natural_language_intents(
+        self, *, repo: str
+    ) -> list[NaturalLanguageIntent]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(build_list_natural_language_intents_query(), (repo,))
+            rows = cursor.fetchall()
+        return [row_to_natural_language_intent(row) for row in rows]
+
+    def promote_natural_language_proposal(
+        self,
+        *,
+        intent_id: str,
+        proposal: dict[str, Any],
+        approver: str,
+    ) -> int:
+        intent = self.get_natural_language_intent(intent_id)
+        if intent is None:
+            raise KeyError(intent_id)
+
+        with self._connection.cursor() as cursor:
+            epic_issue_number = promote_intent_proposal_via_cursor(
+                cursor=cursor,
+                intent=intent,
+                intent_id=intent_id,
+                approver=approver,
+                proposal=proposal,
+                intake_epic_start=INTAKE_EPIC_START,
+                intake_story_start=INTAKE_STORY_START,
+                value_reader=self._value,
+            )
+        self._connection.commit()
+        self.sync_ready_states()
+        return epic_issue_number
+
     def record_approval_event(self, event: ApprovalEvent) -> int | None:
         with self._connection.cursor() as cursor:
             cursor.execute(
@@ -1405,24 +1295,62 @@ class PostgresControlPlaneRepository:
         commit_link: dict[str, Any] | None = None,
         pull_request_link: dict[str, Any] | None = None,
     ) -> None:
-        self.update_work_status(
-            work_id,
-            status,
+        self._apply_finalization_status_update(
+            work_id=work_id,
+            status=status,
             blocked_reason=blocked_reason,
             decision_required=decision_required,
             attempt_count=attempt_count,
             last_failure_reason=last_failure_reason,
             next_eligible_at=next_eligible_at,
         )
-        run_id = self.record_run(execution_run)
-        if verification is not None:
-            self.record_verification(
-                replace(verification, run_id=run_id or verification.run_id)
-            )
-        if commit_link is not None:
-            self.record_commit_link(**commit_link)
-        if pull_request_link is not None:
-            self.record_pull_request_link(**pull_request_link)
+        self._record_finalization_followups(
+            execution_run=execution_run,
+            verification=verification,
+            commit_link=commit_link,
+            pull_request_link=pull_request_link,
+        )
+
+    def _apply_finalization_status_update(
+        self,
+        *,
+        work_id: str,
+        status: WorkStatus,
+        blocked_reason: str | None = None,
+        decision_required: bool = False,
+        attempt_count: int | None = None,
+        last_failure_reason: str | None = None,
+        next_eligible_at: str | None = None,
+    ) -> None:
+        apply_finalization_status_update(
+            update_work_status=self.update_work_status,
+            work_id=work_id,
+            status=status,
+            blocked_reason=blocked_reason,
+            decision_required=decision_required,
+            attempt_count=attempt_count,
+            last_failure_reason=last_failure_reason,
+            next_eligible_at=next_eligible_at,
+        )
+
+    def _record_finalization_followups(
+        self,
+        *,
+        execution_run: ExecutionRun,
+        verification: VerificationEvidence | None = None,
+        commit_link: dict[str, Any] | None = None,
+        pull_request_link: dict[str, Any] | None = None,
+    ) -> None:
+        record_finalization_followups(
+            record_run=self.record_run,
+            record_verification=self.record_verification,
+            record_commit_link=self.record_commit_link,
+            record_pull_request_link=self.record_pull_request_link,
+            execution_run=execution_run,
+            verification=verification,
+            commit_link=commit_link,
+            pull_request_link=pull_request_link,
+        )
 
     def _has_successful_terminal_run(self, work_id: str) -> bool:
         with self._connection.cursor() as cursor:

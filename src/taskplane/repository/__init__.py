@@ -15,8 +15,10 @@ from .protocol import (
     EpicDecompositionRepository,
     EpicRepository,
     ExecutionRepository,
+    ReadyStateSyncRepository,
     StoryDecompositionRepository,
     StoryRepository,
+    SupervisorSchedulingRepository,
     WorkerRepository,
     WorkStateRepository,
 )
@@ -29,6 +31,7 @@ from ..models import with_work_status
 
 __all__ = [
     "WorkStateRepository",
+    "ReadyStateSyncRepository",
     "ClaimRepository",
     "ExecutionRepository",
     "WorkerRepository",
@@ -36,6 +39,7 @@ __all__ = [
     "EpicRepository",
     "StoryDecompositionRepository",
     "EpicDecompositionRepository",
+    "SupervisorSchedulingRepository",
     "ControlPlaneRepository",
     "InMemoryControlPlaneRepository",
     "PostgresControlPlaneRepository",

@@ -467,6 +467,42 @@ class ProgramGovernanceProjection:
     story_dependencies: list[tuple[int, int]] = field(default_factory=list)
 
 
+NaturalLanguageIntentStatus = Literal[
+    "awaiting_clarification",
+    "awaiting_review",
+    "promoted",
+    "rejected",
+]
+
+NaturalLanguageIntentReviewAction = Literal[
+    "approve",
+    "reject",
+    "revise",
+]
+
+
+@dataclass(frozen=True)
+class NaturalLanguageIntent:
+    id: str
+    repo: str
+    prompt: str
+    status: NaturalLanguageIntentStatus
+    conversation: tuple[dict[str, str], ...] = ()
+    summary: str = ""
+    clarification_questions: tuple[str, ...] = ()
+    proposal_json: dict[str, Any] = field(default_factory=dict)
+    analysis_model: str | None = None
+    promoted_epic_issue_number: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    approved_at: datetime | None = None
+    approved_by: str | None = None
+    reviewed_at: datetime | None = None
+    reviewed_by: str | None = None
+    review_action: NaturalLanguageIntentReviewAction | None = None
+    review_feedback: str | None = None
+
+
 def with_work_status(work_item: WorkItem, status: WorkStatus) -> WorkItem:
     return replace(work_item, status=status)
 
