@@ -6,6 +6,7 @@ This module contains the main supervisor scheduling logic.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 # Backward compatibility exports - these are needed for test monkeypatching
@@ -21,7 +22,19 @@ from .job_launcher import (
     insert_execution_job,
 )
 from .repository import PostgresControlPlaneRepository
+from .repository import ReadyStateSyncRepository
+from .repository import SupervisorSchedulingRepository
 from .schedulers.task_scheduler import scheduling_paths, paths_conflict_with_any
+
+_ORIGINAL_POSTGRES_REPOSITORY_BUILDER = PostgresControlPlaneRepository
+
+
+def _resolve_default_repository_builder() -> type[PostgresControlPlaneRepository]:
+    from . import repository as repository_module
+
+    if PostgresControlPlaneRepository is not _ORIGINAL_POSTGRES_REPOSITORY_BUILDER:
+        return PostgresControlPlaneRepository
+    return repository_module.PostgresControlPlaneRepository
 
 
 def run_supervisor_iteration(
@@ -41,6 +54,13 @@ def run_supervisor_iteration(
     global_coordinator: GlobalCoordinator | None = None,
     session_manager: Any | None = None,
     wakeup_dispatcher: Any | None = None,
+    story_executor_command: str | None = None,
+    story_verifier_command: str | None = None,
+    story_force_shell_executor: bool | None = None,
+    ready_state_repository_builder: (
+        Callable[[Any], ReadyStateSyncRepository] | None
+    ) = None,
+    repository_builder: Callable[[Any], SupervisorSchedulingRepository] | None = None,
 ) -> int:
     """
     Run supervisor iteration with optional global coordination support.
@@ -64,11 +84,13 @@ def run_supervisor_iteration(
         Number of jobs launched
     """
     from .process_manager import reconcile_finished_jobs
-    from .repository import PostgresControlPlaneRepository
 
     running_processes = running_processes or {}
-    repository = PostgresControlPlaneRepository(connection)
-    repository.sync_ready_states()
+    default_repository_builder = _resolve_default_repository_builder()
+    ready_state_repository = (
+        ready_state_repository_builder or default_repository_builder
+    )(connection)
+    ready_state_repository.sync_ready_states()
 
     reconcile_finished_jobs(
         connection=connection,
@@ -109,6 +131,8 @@ def run_supervisor_iteration(
 
     if remaining_capacity <= 0:
         return 0
+
+    repository = (repository_builder or default_repository_builder)(connection)
 
     launched = 0
     running_claim_paths = _load_active_claim_paths(connection=connection, repo=repo)
@@ -195,17 +219,41 @@ def run_supervisor_iteration(
     if launched >= remaining_capacity:
         return launched
 
+    selected_story_issue_numbers: list[int] = []
+    epic_issue_by_story_issue_number: dict[int, int] = {}
+
+    resumable_story_candidates = _load_resumable_story_candidates(
+        connection=connection,
+        repo=repo,
+    )
+    for row in resumable_story_candidates:
+        if len(selected_story_issue_numbers) >= remaining_capacity - launched:
+            break
+        story_issue_number = row.get("story_issue_number")
+        epic_issue_number = row.get("epic_issue_number")
+        if story_issue_number is None:
+            continue
+        story_issue_number = int(story_issue_number)
+        if story_issue_number in running_story_issue_numbers:
+            continue
+        selected_story_issue_numbers.append(story_issue_number)
+        running_story_issue_numbers.add(story_issue_number)
+        if epic_issue_number is not None:
+            epic_issue_by_story_issue_number[story_issue_number] = int(epic_issue_number)
+
     # Select and launch story execution jobs via epic iteration
-    selected_story_issue_numbers, epic_issue_by_story_issue_number = (
+    epic_selected_story_issue_numbers, epic_issue_map = (
         _select_story_candidates_via_epic_iteration(
             connection=connection,
             repo=repo,
             repository=repository,
             running_story_issue_numbers=running_story_issue_numbers,
-            available_capacity=remaining_capacity - launched,
+            available_capacity=remaining_capacity - launched - len(selected_story_issue_numbers),
             epic_story_batch_size=epic_story_batch_size,
         )
     )
+    selected_story_issue_numbers.extend(epic_selected_story_issue_numbers)
+    epic_issue_by_story_issue_number.update(epic_issue_map)
     story_wave_by_issue_number = _load_story_allowed_waves(
         repository=repository,
         repo=repo,
@@ -218,19 +266,23 @@ def run_supervisor_iteration(
             connection=connection,
             repo=repo,
         )
-        epic_issue_by_story_issue_number = {
+        completion_epic_issue_by_story_issue_number = {
             int(row["story_issue_number"]): int(row["epic_issue_number"])
             for row in story_completion_candidates
             if row.get("story_issue_number") is not None
             and row.get("epic_issue_number") is not None
         }
-        selected_story_issue_numbers = _select_story_completion_candidates(
+        completion_story_issue_numbers = _select_story_completion_candidates(
             repo=repo,
             repository=repository,
             story_completion_candidates=story_completion_candidates,
             running_story_issue_numbers=running_story_issue_numbers,
-            available_capacity=remaining_capacity - launched,
+            available_capacity=remaining_capacity - launched - len(selected_story_issue_numbers),
             epic_story_batch_size=epic_story_batch_size,
+        )
+        selected_story_issue_numbers.extend(completion_story_issue_numbers)
+        epic_issue_by_story_issue_number.update(
+            completion_epic_issue_by_story_issue_number
         )
         story_wave_by_issue_number = _load_story_allowed_waves(
             repository=repository,
@@ -247,11 +299,15 @@ def run_supervisor_iteration(
 
         command = build_story_command(
             dsn=dsn,
+            repo=repo,
             story_issue_number=story_issue_number,
             allowed_waves=story_wave_by_issue_number.get(story_issue_number, ()),
             project_dir=project_dir,
             worktree_root=worktree_root,
             promotion_repo_root=promotion_repo_root,
+            executor_command=story_executor_command,
+            verifier_command=story_verifier_command,
+            force_shell_executor=story_force_shell_executor,
         )
         log_path = log_dir / f"story-{story_issue_number}.log"
         process = launcher(command, log_path)
@@ -446,6 +502,33 @@ def _load_story_completion_candidates(
                     AND wi.status = 'blocked'
               )
             ORDER BY ps.issue_number
+            """,
+            (repo,),
+        )
+        return list(cursor.fetchall())
+
+
+def _load_resumable_story_candidates(
+    *, connection: Any, repo: str
+) -> list[dict[str, Any]]:
+    """Load story candidates that already have active execution sessions."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT DISTINCT
+                wi.canonical_story_issue_number AS story_issue_number,
+                ps.epic_issue_number
+            FROM execution_session es
+            JOIN work_item wi
+              ON wi.id = es.work_id
+            JOIN program_story ps
+              ON ps.repo = wi.repo
+             AND ps.issue_number = wi.canonical_story_issue_number
+            WHERE wi.repo = %s
+              AND wi.canonical_story_issue_number IS NOT NULL
+              AND es.status = 'active'
+              AND wi.status IN ('ready', 'pending', 'in_progress', 'verifying')
+            ORDER BY story_issue_number
             """,
             (repo,),
         )

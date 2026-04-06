@@ -154,7 +154,7 @@ CREATE INDEX IF NOT EXISTS idx_retry_policy_active
 INSERT INTO retry_policy (failure_reason_pattern, max_retries, base_backoff_minutes, max_backoff_minutes, backoff_multiplier) VALUES
     ('timeout', 3, 5, 120, 2.0),
     ('interrupted_retryable', 5, 2, 60, 2.0),
-    ('contextweaver-index-failed', 3, 1, 30, 2.0),
+    ('contextatlas-index-failed', 3, 1, 30, 2.0),
     ('git-lock-conflict', 3, 1, 15, 3.0),
     ('resource_temporarily_unavailable', 5, 1, 30, 2.0)
 ON CONFLICT DO NOTHING;

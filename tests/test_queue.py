@@ -122,6 +122,33 @@ def test_evaluate_work_queue_blocks_ready_items_when_claimed_paths_conflict():
     }
 
 
+def test_evaluate_work_queue_allows_all_waves_when_filter_is_empty():
+    work_items = [
+        WorkItem(
+            id="task-88",
+            title="wave unrestricted",
+            lane="Lane 04",
+            wave="wave-9",
+            status="pending",
+        )
+    ]
+    context = ExecutionGuardrailContext(
+        allowed_waves=set(),
+        frozen_prefixes=("docs/authority/",),
+    )
+
+    evaluation = evaluate_work_queue(
+        work_items=work_items,
+        dependencies=[],
+        targets_by_work_id={},
+        context=context,
+        active_claims=[],
+    )
+
+    assert evaluation.executable_ids == ["task-88"]
+    assert evaluation.blocked_by_id == {}
+
+
 def test_evaluate_work_queue_ignores_expired_claims_for_path_conflict():
     work_items = [
         WorkItem(

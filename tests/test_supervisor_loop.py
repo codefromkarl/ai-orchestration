@@ -59,7 +59,120 @@ def test_run_supervisor_iteration_syncs_ready_states_before_scheduling(tmp_path)
     )
 
     assert launched == 0
-    assert any("WITH ready_eval AS" in sql for sql in executed_sql)
+    assert any("SELECT wi.id" in sql for sql in executed_sql)
+    assert any("UPDATE work_item wi" in sql for sql in executed_sql)
+
+
+def test_run_supervisor_iteration_can_inject_sync_ready_capability_without_building_scheduling_repository(
+    tmp_path,
+):
+    sync_calls: list[object] = []
+
+    class SyncOnlyRepository:
+        def __init__(self, connection) -> None:
+            self.connection = connection
+
+        def sync_ready_states(self) -> None:
+            sync_calls.append(self.connection)
+
+    class FakeCursor:
+        def __init__(self) -> None:
+            self.last_sql = ""
+
+        def execute(self, sql, params=None):
+            self.last_sql = sql
+
+        def fetchall(self):
+            if "FROM execution_job" in self.last_sql:
+                return []
+            return []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+    class FakeConnection:
+        def cursor(self):
+            return FakeCursor()
+
+        def commit(self):
+            return None
+
+    connection = FakeConnection()
+
+    launched = run_supervisor_iteration(
+        connection=connection,
+        repo="codefromkarl/stardrifter",
+        dsn="postgresql://user:pass@localhost/db",
+        project_dir=tmp_path,
+        log_dir=tmp_path / "logs",
+        worktree_root=tmp_path / "worktrees",
+        max_parallel_jobs=0,
+        launcher=lambda command, log_path: None,
+        ready_state_repository_builder=SyncOnlyRepository,
+        repository_builder=lambda connection: (_ for _ in ()).throw(
+            AssertionError("scheduling repository should not be constructed")
+        ),
+    )
+
+    assert launched == 0
+    assert sync_calls == [connection]
+
+
+def test_run_supervisor_iteration_sync_ready_sql_guards_waiting_sessions(tmp_path):
+    executed_sql: list[str] = []
+
+    class FakeCursor:
+        def __init__(self) -> None:
+            self.last_sql = ""
+
+        def execute(self, sql, params=None):
+            self.last_sql = sql
+            executed_sql.append(sql)
+
+        def fetchall(self):
+            if "FROM execution_job" in self.last_sql:
+                return []
+            if "FROM work_claim" in self.last_sql:
+                return []
+            if "FROM work_dependency" in self.last_sql:
+                return []
+            if "FROM v_story_decomposition_queue" in self.last_sql:
+                return []
+            if "FROM v_active_task_queue" in self.last_sql:
+                return []
+            return []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+    class FakeConnection:
+        def cursor(self):
+            return FakeCursor()
+
+        def commit(self):
+            return None
+
+    run_supervisor_iteration(
+        connection=FakeConnection(),
+        repo="codefromkarl/stardrifter",
+        dsn="postgresql://user:pass@localhost/db",
+        project_dir=tmp_path,
+        log_dir=tmp_path / "logs",
+        worktree_root=tmp_path / "worktrees",
+        max_parallel_jobs=1,
+        launcher=lambda command, log_path: None,
+    )
+
+    executed = "\n".join(executed_sql)
+    assert "FROM execution_session es" in executed
+    assert "es.work_id = wi.id" in executed
+    assert "es.status IN ('suspended', 'waiting_internal', 'waiting_external')" in executed
 
 
 def test_run_supervisor_iteration_launches_decomposition_and_story_jobs(tmp_path):
@@ -568,6 +681,8 @@ def test_run_supervisor_iteration_prioritizes_low_conflict_tasks(tmp_path):
                 return []
             if "FROM work_claim" in self.last_sql:
                 return []
+            if self.last_sql.lstrip().startswith("SELECT wi.id"):
+                return []
             if "FROM work_dependency" in self.last_sql:
                 return [
                     {
@@ -680,6 +795,8 @@ def test_run_supervisor_iteration_traces_dependencies_to_root_tasks(tmp_path):
             if "FROM execution_job" in self.last_sql:
                 return []
             if "FROM work_claim" in self.last_sql:
+                return []
+            if self.last_sql.lstrip().startswith("SELECT wi.id"):
                 return []
             if "FROM v_story_decomposition_queue" in self.last_sql:
                 return []
@@ -1164,6 +1281,8 @@ def test_run_supervisor_iteration_defaults_story_selection_to_one_per_epic(
                 return []
             if "FROM v_story_decomposition_queue" in self.last_sql:
                 return []
+            if "FROM execution_session es" in self.last_sql:
+                return []
             if "FROM program_story ps" in self.last_sql:
                 return [
                     {"story_issue_number": 41, "epic_issue_number": 11},
@@ -1594,6 +1713,90 @@ def test_run_supervisor_iteration_prefers_epic_iteration_story_selection_over_co
     assert iterated_epics == [11]
     assert any("--story-issue-number 42" in command for command in launched_commands)
     assert any("--story-issue-number 43" in command for command in launched_commands)
+
+
+def test_run_supervisor_iteration_prefers_resumable_story_before_completion_candidate(
+    tmp_path,
+):
+    launched_commands: list[str] = []
+
+    class FakeCursor:
+        def __init__(self) -> None:
+            self.last_sql = ""
+
+        def execute(self, sql, params=None):
+            self.last_sql = sql
+
+        def fetchall(self):
+            if "FROM execution_job" in self.last_sql:
+                return []
+            if "FROM work_claim" in self.last_sql:
+                return []
+            if "FROM work_dependency" in self.last_sql:
+                return []
+            if "FROM v_epic_decomposition_queue" in self.last_sql:
+                return []
+            if "FROM v_story_decomposition_queue" in self.last_sql:
+                return []
+            if "FROM execution_session es" in self.last_sql:
+                return [{"story_issue_number": 132, "epic_issue_number": 64}]
+            if "ps.execution_status NOT IN ('done', 'gated')" in self.last_sql:
+                return [{"story_issue_number": -1901, "epic_issue_number": 19}]
+            if "FROM v_active_task_queue" in self.last_sql:
+                return []
+            if "epic_issue_number = %s" in self.last_sql:
+                return [
+                    {
+                        "issue_number": 132,
+                        "repo": "codefromkarl/stardrifter",
+                        "epic_issue_number": 64,
+                        "title": "Story 132",
+                        "lane": "Lane 09",
+                        "complexity": "medium",
+                        "program_status": "approved",
+                        "execution_status": "active",
+                        "active_wave": "Wave0",
+                        "notes": None,
+                    }
+                ]
+            return []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+    class FakeConnection:
+        def cursor(self):
+            return FakeCursor()
+
+        def commit(self):
+            return None
+
+    class FakeProcess:
+        pid = 9201
+
+        def poll(self):
+            return None
+
+    launched = run_supervisor_iteration(
+        connection=FakeConnection(),
+        repo="codefromkarl/stardrifter",
+        dsn="postgresql://user:pass@localhost/db",
+        project_dir=tmp_path,
+        log_dir=tmp_path / "logs",
+        worktree_root=tmp_path / "worktrees",
+        max_parallel_jobs=1,
+        launcher=lambda command, log_path: (
+            launched_commands.append(command) or FakeProcess()
+        ),
+    )
+
+    assert launched == 1
+    assert len(launched_commands) == 1
+    assert "--story-issue-number 132" in launched_commands[0]
+    assert "--story-issue-number -1901" not in launched_commands[0]
 
 
 def test_run_supervisor_iteration_keeps_story_completion_candidate_fallback_when_epic_iteration_selects_nothing(

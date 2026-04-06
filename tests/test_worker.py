@@ -69,7 +69,7 @@ def test_failure_policy_classifies_auto_resolvable_and_human_required_reasons():
     assert is_auto_resolvable_failure("paused_for_input: waiting on next step") is True
     assert is_auto_resolvable_failure("missing-terminal-payload") is False
     assert is_auto_resolvable_failure("multiple-terminal-payloads") is False
-    assert is_auto_resolvable_failure("contextweaver-index-failed") is False
+    assert is_auto_resolvable_failure("contextatlas-index-failed") is False
     assert is_auto_resolvable_failure("tooling_error") is False
 
     assert is_human_required_failure("credential_required") is True
@@ -396,20 +396,24 @@ def test_run_worker_cycle_marks_already_satisfied_done_after_verification():
         repository=repository,
         context=context,
         worker_name="worker-a",
-        executor=lambda work_item, workspace_path=None, execution_context=None: ExecutionResult(
-            success=True,
-            summary="already satisfied",
-            result_payload_json={
-                "outcome": "already_satisfied",
-                "summary": "already satisfied",
-            },
+        executor=lambda work_item, workspace_path=None, execution_context=None: (
+            ExecutionResult(
+                success=True,
+                summary="already satisfied",
+                result_payload_json={
+                    "outcome": "already_satisfied",
+                    "summary": "already satisfied",
+                },
+            )
         ),
-        verifier=lambda work_item, workspace_path=None, execution_context=None: VerificationEvidence(
-            work_id=work_item.id,
-            check_type="pytest",
-            command="pytest -q",
-            passed=True,
-            output_digest="ok",
+        verifier=lambda work_item, workspace_path=None, execution_context=None: (
+            VerificationEvidence(
+                work_id=work_item.id,
+                check_type="pytest",
+                command="pytest -q",
+                passed=True,
+                output_digest="ok",
+            )
         ),
         committer=None,
     )
@@ -463,7 +467,9 @@ def test_worker_build_pull_request_link_requires_work_item_identity_and_payload_
 
     assert _build_pull_request_link(
         work_item=work_item,
-        result_payload_json={"pull_request": {"pull_number": 81, "pull_url": "https://example/pull/81"}},
+        result_payload_json={
+            "pull_request": {"pull_number": 81, "pull_url": "https://example/pull/81"}
+        },
     ) == {
         "work_id": "task-1",
         "repo": "codefromkarl/stardrifter",
@@ -472,16 +478,24 @@ def test_worker_build_pull_request_link_requires_work_item_identity_and_payload_
         "pull_url": "https://example/pull/81",
     }
 
-    assert _build_pull_request_link(
-        work_item=WorkItem(
-            id="task-2",
-            title="task",
-            lane="Lane 01",
-            wave="wave-1",
-            status="done",
-        ),
-        result_payload_json={"pull_request": {"pull_number": 81, "pull_url": "https://example/pull/81"}},
-    ) is None
+    assert (
+        _build_pull_request_link(
+            work_item=WorkItem(
+                id="task-2",
+                title="task",
+                lane="Lane 01",
+                wave="wave-1",
+                status="done",
+            ),
+            result_payload_json={
+                "pull_request": {
+                    "pull_number": 81,
+                    "pull_url": "https://example/pull/81",
+                }
+            },
+        )
+        is None
+    )
 
 
 def test_worker_build_commit_link_requires_committed_result_and_work_item_identity():
@@ -512,16 +526,19 @@ def test_worker_build_commit_link_requires_committed_result_and_work_item_identi
         "commit_message": "chore(task-3): complete task #3",
     }
 
-    assert _build_commit_link(
-        work_item=work_item,
-        commit_result=CommitResult(
-            committed=False,
-            commit_sha="def456",
-            blocked_reason=None,
-            summary="committed",
-            commit_message="chore(task-3): complete task #3",
-        ),
-    ) is None
+    assert (
+        _build_commit_link(
+            work_item=work_item,
+            commit_result=CommitResult(
+                committed=False,
+                commit_sha="def456",
+                blocked_reason=None,
+                summary="committed",
+                commit_message="chore(task-3): complete task #3",
+            ),
+        )
+        is None
+    )
 
 
 def test_worker_build_post_verification_outcome_blocks_duplicate_canonical_commit():
@@ -570,6 +587,49 @@ def test_worker_build_post_verification_outcome_routes_to_awaiting_approval_when
     )
 
     assert outcome == ("awaiting_approval", None, True)
+
+
+def test_worker_build_post_verification_outcome_requeues_checkpoint_payload():
+    outcome = _build_post_verification_outcome(
+        verification_passed=True,
+        verification_output_digest="ok",
+        approval_required=False,
+        session_runtime_present=False,
+        already_satisfied=False,
+        existing_commit_link=None,
+        commit_result=None,
+        result_payload_json={
+            "execution_kind": "checkpoint",
+            "phase": "implementing",
+            "summary": "step 1 complete",
+        },
+    )
+
+    assert outcome == ("pending", None, False)
+
+
+def test_worker_build_failure_finalization_requeues_wait_payload_without_attempt_penalty():
+    finalization = _build_failure_finalization(
+        claimed_work_id="task-1",
+        worker_name="worker-a",
+        execution_result=ExecutionResult(
+            success=False,
+            summary="waiting for external event",
+            blocked_reason="session-waiting",
+            result_payload_json={
+                "execution_kind": "wait",
+                "wait_type": "external_event",
+                "summary": "waiting for external event",
+            },
+        ),
+        current_attempt_count=2,
+        branch_name="branch-1",
+    )
+
+    assert finalization["status"] == "pending"
+    assert finalization["blocked_reason"] is None
+    assert finalization["attempt_count"] == 2
+    assert finalization["last_failure_reason"] is None
 
 
 def test_worker_build_failure_finalization_requeues_timeout_with_retry_metadata():
@@ -646,7 +706,9 @@ def test_worker_build_failure_finalization_keeps_tooling_error_blocked_without_r
     assert finalization["execution_run"].branch_name == "branch-3"
 
 
-def test_worker_run_verifier_for_execution_result_sets_and_restores_changed_paths_env(monkeypatch):
+def test_worker_run_verifier_for_execution_result_sets_and_restores_changed_paths_env(
+    monkeypatch,
+):
     monkeypatch.setenv(
         "TASKPLANE_EXECUTION_CHANGED_PATHS_JSON",
         '["preexisting/path.py"]',
@@ -692,10 +754,7 @@ def test_worker_run_verifier_for_execution_result_sets_and_restores_changed_path
     )
 
     assert verification.passed is True
-    assert (
-        captured["during"]
-        == '["src/runtime.py", "tests/test_runtime.py"]'
-    )
+    assert captured["during"] == '["src/runtime.py", "tests/test_runtime.py"]'
     assert (
         os.environ.get("TASKPLANE_EXECUTION_CHANGED_PATHS_JSON")
         == '["preexisting/path.py"]'
@@ -861,20 +920,28 @@ def test_run_worker_cycle_drives_checkpoint_session_to_terminal_result():
             },
         )
 
+    runtime_manager = InMemorySessionManager()
+    runtime = WorkerSessionRuntime(
+        session_manager=runtime_manager,
+        wakeup_dispatcher=InMemoryWakeupDispatcher(),
+    )
+
     result = run_worker_cycle(
         repository=repository,
         context=context,
         worker_name="worker-a",
         executor=executor,
-        verifier=lambda work_item, workspace_path=None, execution_context=None: VerificationEvidence(
-            work_id=work_item.id,
-            check_type="pytest",
-            command="pytest -q",
-            passed=True,
-            output_digest="ok",
+        verifier=lambda work_item, workspace_path=None, execution_context=None: (
+            VerificationEvidence(
+                work_id=work_item.id,
+                check_type="pytest",
+                command="pytest -q",
+                passed=True,
+                output_digest="ok",
+            )
         ),
         committer=None,
-        session_runtime=True,
+        session_runtime=runtime,
     )
 
     assert result.claimed_work_id == "issue-89"
@@ -953,12 +1020,14 @@ def test_run_worker_cycle_uses_runtime_resume_context_builder_for_followup_turns
         context=context,
         worker_name="worker-a",
         executor=executor,
-        verifier=lambda work_item, workspace_path=None, execution_context=None: VerificationEvidence(
-            work_id=work_item.id,
-            check_type="pytest",
-            command="pytest -q",
-            passed=True,
-            output_digest="ok",
+        verifier=lambda work_item, workspace_path=None, execution_context=None: (
+            VerificationEvidence(
+                work_id=work_item.id,
+                check_type="pytest",
+                command="pytest -q",
+                passed=True,
+                output_digest="ok",
+            )
         ),
         committer=None,
         session_runtime=runtime,
@@ -970,6 +1039,49 @@ def test_run_worker_cycle_uses_runtime_resume_context_builder_for_followup_turns
         "Summary:\nstore-backed",
         "Summary:\nstore-backed after checkpoint",
     ]
+
+
+def test_run_worker_cycle_rejects_unsupported_session_runtime_object():
+    repository = InMemoryControlPlaneRepository(
+        work_items=[
+            WorkItem(
+                id="issue-90b",
+                title="invalid runtime",
+                lane="Lane 02",
+                wave="wave-2",
+                status="ready",
+            )
+        ],
+        dependencies=[],
+        targets_by_work_id={},
+    )
+    context = ExecutionGuardrailContext(
+        allowed_waves={"wave-2"},
+        frozen_prefixes=("docs/authority/",),
+    )
+
+    with pytest.raises(TypeError, match="unsupported session runtime"):
+        run_worker_cycle(
+            repository=repository,
+            context=context,
+            worker_name="worker-a",
+            executor=lambda *args, **kwargs: ExecutionResult(
+                success=True,
+                summary="done",
+                result_payload_json={"outcome": "done", "summary": "ok"},
+            ),
+            verifier=lambda work_item, workspace_path=None, execution_context=None: (
+                VerificationEvidence(
+                    work_id=work_item.id,
+                    check_type="pytest",
+                    command="pytest -q",
+                    passed=True,
+                    output_digest="ok",
+                )
+            ),
+            committer=None,
+            session_runtime=object(),
+        )
 
 
 def test_build_worker_resume_context_builder_uses_context_and_artifact_stores(
@@ -1949,7 +2061,10 @@ def test_run_worker_cycle_blocks_invalid_result_payload_failure():
 
     assert result.claimed_work_id == "task-38"
     assert repository.work_items_by_id["task-38"].status == "blocked"
-    assert repository.work_items_by_id["task-38"].blocked_reason == "invalid-result-payload"
+    assert (
+        repository.work_items_by_id["task-38"].blocked_reason
+        == "invalid-result-payload"
+    )
     assert repository.work_items_by_id["task-38"].attempt_count == 0
     assert repository.work_items_by_id["task-38"].last_failure_reason is None
 

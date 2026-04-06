@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Callable, Literal
+
+from .models import ExecutionSession
+from .protocols import SessionManagerProtocol, WakeupDispatcherProtocol
 
 EXECUTION_KIND_CHECKPOINT = "checkpoint"
 EXECUTION_KIND_WAIT = "wait"
@@ -42,6 +45,16 @@ SessionExecutionKind = Literal[
 ]
 
 SessionOutcome = Literal["done", "already_satisfied", "blocked", "needs_decision"]
+SessionResumeContextBuilder = Callable[[ExecutionSession], str]
+
+
+@dataclass(frozen=True)
+class SessionRuntimeAdapter:
+    session_manager: SessionManagerProtocol
+    wakeup_dispatcher: WakeupDispatcherProtocol
+    max_iterations: int = 8
+    resume_context_builder: SessionResumeContextBuilder | None = None
+    allow_wait_suspension: bool = False
 
 
 @dataclass(frozen=True)
@@ -91,6 +104,89 @@ class ParsedExecutorPayload:
     terminal: TerminalOutcomePayload | None = None
     raw_payload: dict[str, Any] = field(default_factory=dict)
     unexpected_reason: str | None = None
+
+
+def build_session_runtime_adapter(
+    *,
+    session_manager: SessionManagerProtocol,
+    wakeup_dispatcher: WakeupDispatcherProtocol | None = None,
+    max_iterations: int = 8,
+    resume_context_builder: SessionResumeContextBuilder | None = None,
+    allow_wait_suspension: bool = False,
+) -> SessionRuntimeAdapter:
+    if wakeup_dispatcher is None:
+        from .wakeup_dispatcher import InMemoryWakeupDispatcher
+
+        wakeup_dispatcher = InMemoryWakeupDispatcher()
+    return SessionRuntimeAdapter(
+        session_manager=session_manager,
+        wakeup_dispatcher=wakeup_dispatcher,
+        max_iterations=max_iterations,
+        resume_context_builder=resume_context_builder,
+        allow_wait_suspension=allow_wait_suspension,
+    )
+
+
+def _is_session_runtime_adapter(value: object) -> bool:
+    return (
+        hasattr(value, "session_manager")
+        and hasattr(value, "wakeup_dispatcher")
+        and hasattr(value, "max_iterations")
+        and hasattr(value, "allow_wait_suspension")
+    )
+
+
+def _looks_like_session_manager(value: object) -> bool:
+    required_attributes = (
+        "create_session",
+        "get_session",
+        "update_session_status",
+        "suspend_session",
+        "resume_session",
+        "update_session_phase",
+        "append_checkpoint",
+        "get_latest_checkpoint",
+        "record_policy_resolution",
+        "build_resume_context",
+        "list_active_sessions_for_work",
+    )
+    return all(hasattr(value, attribute) for attribute in required_attributes)
+
+
+def coerce_session_runtime_adapter(
+    session_runtime: object | None,
+    *,
+    max_iterations: int = 8,
+) -> SessionRuntimeAdapter | None:
+    if session_runtime in (None, False, True):
+        return None
+    if isinstance(session_runtime, SessionRuntimeAdapter):
+        return session_runtime
+    if _is_session_runtime_adapter(session_runtime):
+        return build_session_runtime_adapter(
+            session_manager=session_runtime.session_manager,
+            wakeup_dispatcher=session_runtime.wakeup_dispatcher,
+            max_iterations=int(
+                getattr(session_runtime, "max_iterations", max_iterations) or max_iterations
+            ),
+            resume_context_builder=getattr(
+                session_runtime, "resume_context_builder", None
+            ),
+            allow_wait_suspension=bool(
+                getattr(session_runtime, "allow_wait_suspension", False)
+            ),
+        )
+    if _looks_like_session_manager(session_runtime):
+        return build_session_runtime_adapter(
+            session_manager=session_runtime,
+            max_iterations=max_iterations,
+            resume_context_builder=getattr(
+                session_runtime, "resume_context_builder", None
+            ),
+        )
+    raise TypeError(
+        f"unsupported session runtime: {type(session_runtime).__name__}"
+    )
 
 
 def _as_raw_payload(payload: Any) -> dict[str, Any]:

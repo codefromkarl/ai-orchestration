@@ -31,10 +31,17 @@ def main(
     story_verifier_builder: Callable[..., object] = build_task_verifier,
     committer_builder: Callable[..., object] = build_git_committer,
     story_integrator_builder: Callable[..., object] = build_git_story_integrator,
+    session_runtime_builder: Callable[[str], tuple[Any, Any] | None] | None = None,
 ) -> int:
     args = _build_parser().parse_args(list(argv) if argv is not None else None)
     settings = load_postgres_settings_from_env()
     repository = repository_builder(dsn=settings.dsn)
+    runtime_builder = session_runtime_builder or _build_postgres_session_runtime
+    runtime_components = runtime_builder(settings.dsn)
+    session_manager = None
+    wakeup_dispatcher = None
+    if runtime_components is not None:
+        session_manager, wakeup_dispatcher = runtime_components
     context = ExecutionGuardrailContext(
         allowed_waves=set(args.allowed_wave),
         frozen_prefixes=tuple(args.frozen_prefix) or ("docs/authority/",),
@@ -86,6 +93,7 @@ def main(
     story_work_item_ids = story_loader(
         repository=repository,
         story_issue_number=args.story_issue_number,
+        repo=args.repo,
     )
     result = story_runner(
         story_issue_number=args.story_issue_number,
@@ -99,6 +107,8 @@ def main(
         committer=committer,
         story_integrator=story_integrator,
         workspace_manager=workspace_manager,
+        session_manager=session_manager,
+        wakeup_dispatcher=wakeup_dispatcher,
         dsn=settings.dsn,
     )
     if result.story_complete:
@@ -128,6 +138,7 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Drain all projected work items under a story until completion or blockage.",
     )
     parser.add_argument("--story-issue-number", type=int, required=True)
+    parser.add_argument("--repo")
     parser.add_argument("--worker-name", default="story-runner")
     parser.add_argument("--allowed-wave", action="append", default=[])
     parser.add_argument("--frozen-prefix", action="append", default=[])
@@ -140,6 +151,23 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--story-verifier-command")
     parser.add_argument("--story-verifier-check-type", default="pytest")
     return parser
+
+
+def _build_postgres_session_runtime(dsn: str) -> tuple[Any, Any] | None:
+    try:
+        import psycopg
+        from psycopg.rows import dict_row
+
+        from .session_manager_postgres import PostgresSessionManager
+        from .wakeup_dispatcher import PostgresWakeupDispatcher
+
+        connection = psycopg.connect(dsn, row_factory=dict_row)
+        return (
+            PostgresSessionManager(connection),
+            PostgresWakeupDispatcher(connection),
+        )
+    except Exception:
+        return None
 
 
 def _relative_ignored_prefixes(

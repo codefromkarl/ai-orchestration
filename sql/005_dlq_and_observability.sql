@@ -22,9 +22,9 @@ CREATE TABLE IF NOT EXISTS dead_letter_queue (
 COMMENT ON TABLE dead_letter_queue IS 'Tasks that exhausted retries and need manual intervention';
 COMMENT ON COLUMN dead_letter_queue.resolution IS 'human_resolve / auto_retry / archived';
 
-CREATE INDEX idx_dlq_by_work ON dead_letter_queue (work_id);
-CREATE INDEX idx_dlq_by_resolution ON dead_letter_queue (resolution);
-CREATE INDEX idx_dlq_by_moved_at ON dead_letter_queue (moved_at DESC);
+CREATE INDEX IF NOT EXISTS idx_dlq_by_work ON dead_letter_queue (work_id);
+CREATE INDEX IF NOT EXISTS idx_dlq_by_resolution ON dead_letter_queue (resolution);
+CREATE INDEX IF NOT EXISTS idx_dlq_by_moved_at ON dead_letter_queue (moved_at DESC);
 
 -- ============================================================================
 -- 2. Event Log table (for timeline / observability)
@@ -48,9 +48,9 @@ CREATE TABLE IF NOT EXISTS event_log (
 
 COMMENT ON TABLE event_log IS 'Chronological event stream for observability and timeline';
 
-CREATE INDEX idx_event_log_by_work ON event_log (work_id, created_at DESC);
-CREATE INDEX idx_event_log_by_type ON event_log (event_type, created_at DESC);
-CREATE INDEX idx_event_log_by_created ON event_log (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_event_log_by_work ON event_log (work_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_event_log_by_type ON event_log (event_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_event_log_by_created ON event_log (created_at DESC);
 
 -- ============================================================================
 -- 3. Views

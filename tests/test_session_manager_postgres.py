@@ -109,3 +109,21 @@ class TestPostgresSessionManagerPolicyResolution:
         assert len(conn.executed) == 2
         assert "INSERT INTO policy_resolution" in conn.executed[0][0]
         assert "FROM policy_resolution" in conn.executed[1][0]
+
+    def test_append_checkpoint_accepts_dict_row_for_phase_index(self) -> None:
+        conn = FakeConnection(
+            rows=[
+                {"next_index": 1},
+            ]
+        )
+        mgr = PostgresSessionManager(conn)
+
+        session = mgr.create_session(work_id="work-1")
+        checkpoint = mgr.append_checkpoint(
+            session.id,
+            phase="planning",
+            summary="first checkpoint",
+        )
+
+        assert checkpoint is not None
+        assert checkpoint.phase_index == 1

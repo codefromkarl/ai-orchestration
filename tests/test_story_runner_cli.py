@@ -13,9 +13,10 @@ def test_story_runner_cli_loads_story_items_and_runs(monkeypatch, capsys):
         captured["dsn"] = dsn
         return object()
 
-    def fake_story_loader(*, repository, story_issue_number: int):
+    def fake_story_loader(*, repository, story_issue_number: int, repo: str | None = None):
         captured["repository"] = repository
         captured["story_issue_number"] = story_issue_number
+        captured["repo"] = repo
         return ["issue-56", "issue-57"]
 
     def fake_story_runner(
@@ -31,6 +32,8 @@ def test_story_runner_cli_loads_story_items_and_runs(monkeypatch, capsys):
         committer,
         story_integrator=None,
         workspace_manager=None,
+        session_manager=None,
+        wakeup_dispatcher=None,
         dsn=None,
     ):
         captured["worker_name"] = worker_name
@@ -63,8 +66,98 @@ def test_story_runner_cli_loads_story_items_and_runs(monkeypatch, capsys):
     assert exit_code == 0
     assert captured["dsn"] == "postgresql://user:pass@localhost:5432/stardrifter"
     assert captured["story_issue_number"] == 29
+    assert captured["repo"] is None
     assert captured["story_work_item_ids"] == ["issue-56", "issue-57"]
     assert captured["story_integrator"] is None
+    assert "story 29 complete" in capsys.readouterr().out
+
+
+def test_story_runner_cli_passes_persistent_runtime_components(monkeypatch, capsys):
+    monkeypatch.setenv(
+        "TASKPLANE_DSN",
+        "postgresql://user:pass@localhost:5432/stardrifter",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_story_runner(
+        *,
+        story_issue_number: int,
+        story_work_item_ids,
+        repository,
+        context,
+        worker_name: str,
+        executor,
+        verifier,
+        story_verifier=None,
+        committer,
+        story_integrator=None,
+        workspace_manager=None,
+        session_manager=None,
+        wakeup_dispatcher=None,
+        dsn=None,
+    ):
+        captured["session_manager"] = session_manager
+        captured["wakeup_dispatcher"] = wakeup_dispatcher
+        return StoryRunResult(
+            story_issue_number=story_issue_number,
+            completed_work_item_ids=["issue-56"],
+            blocked_work_item_ids=[],
+            remaining_work_item_ids=[],
+            story_complete=True,
+        )
+
+    exit_code = main(
+        [
+            "--story-issue-number",
+            "29",
+        ],
+        repository_builder=lambda *, dsn: object(),
+        story_loader=lambda **kwargs: ["issue-56"],
+        story_runner=fake_story_runner,
+        session_runtime_builder=lambda dsn: ("session-manager", "wakeup-dispatcher"),
+    )
+
+    assert exit_code == 0
+    assert captured["session_manager"] == "session-manager"
+    assert captured["wakeup_dispatcher"] == "wakeup-dispatcher"
+    assert "story 29 complete" in capsys.readouterr().out
+
+
+def test_story_runner_cli_passes_repo_to_story_loader_when_provided(
+    monkeypatch, capsys
+):
+    monkeypatch.setenv(
+        "TASKPLANE_DSN",
+        "postgresql://user:pass@localhost:5432/stardrifter",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_story_loader(*, repository, story_issue_number: int, repo: str | None = None):
+        captured["repository"] = repository
+        captured["story_issue_number"] = story_issue_number
+        captured["repo"] = repo
+        return ["issue-56"]
+
+    exit_code = main(
+        [
+            "--story-issue-number",
+            "29",
+            "--repo",
+            "demo/taskplane",
+        ],
+        repository_builder=lambda *, dsn: object(),
+        story_loader=fake_story_loader,
+        story_runner=lambda **kwargs: StoryRunResult(
+            story_issue_number=kwargs["story_issue_number"],
+            completed_work_item_ids=["issue-56"],
+            blocked_work_item_ids=[],
+            remaining_work_item_ids=[],
+            story_complete=True,
+        ),
+    )
+
+    assert exit_code == 0
+    assert captured["repo"] == "demo/taskplane"
     assert "story 29 complete" in capsys.readouterr().out
 
 
@@ -105,6 +198,8 @@ def test_story_runner_cli_builds_shell_adapters_when_commands_are_provided(
         committer,
         story_integrator=None,
         workspace_manager=None,
+        session_manager=None,
+        wakeup_dispatcher=None,
         dsn=None,
     ):
         captured["executor"] = executor
@@ -185,6 +280,8 @@ def test_story_runner_cli_uses_task_verifier_by_default(monkeypatch, tmp_path):
         committer,
         story_integrator=None,
         workspace_manager=None,
+        session_manager=None,
+        wakeup_dispatcher=None,
         dsn=None,
     ):
         captured["verifier"] = verifier
@@ -250,6 +347,8 @@ def test_story_runner_cli_builds_story_verifier_when_command_is_provided(
         committer,
         story_integrator=None,
         workspace_manager=None,
+        session_manager=None,
+        wakeup_dispatcher=None,
         dsn=None,
     ):
         captured["story_verifier"] = story_verifier
@@ -317,6 +416,8 @@ def test_story_runner_cli_builds_workspace_manager_when_worktree_root_is_provide
         committer,
         story_integrator=None,
         workspace_manager=None,
+        session_manager=None,
+        wakeup_dispatcher=None,
         dsn=None,
     ):
         captured["story_integrator"] = story_integrator

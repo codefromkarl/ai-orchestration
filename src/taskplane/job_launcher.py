@@ -94,11 +94,15 @@ def build_epic_decomposition_command(
 def build_story_command(
     *,
     dsn: str,
+    repo: str | None = None,
     story_issue_number: int,
     allowed_waves: tuple[str, ...] = (),
     project_dir: Path,
     worktree_root: Path | None,
     promotion_repo_root: Path | None,
+    executor_command: str | None = None,
+    verifier_command: str | None = None,
+    force_shell_executor: bool | None = None,
 ) -> str:
     """
     Build command for story execution.
@@ -115,17 +119,63 @@ def build_story_command(
     """
     normalized_allowed_waves = tuple(
         wave for wave in allowed_waves if isinstance(wave, str) and wave.strip()
-    ) or ("unassigned", "Wave0", "1", "2", "3", "wave-4", "Wave-INT", "wave-int")
+    ) or (
+        "unassigned",
+        "Wave0",
+        "1",
+        "2",
+        "3",
+        "wave-1",
+        "wave-2",
+        "wave-3",
+        "wave-4",
+        "Wave-INT",
+        "wave-int",
+    )
 
-    command = (
+    resolved_executor_command = (
+        executor_command
+        if executor_command is not None
+        else (
+            os.environ.get("TASKPLANE_STORY_EXECUTOR_COMMAND")
+            or "python3 -m taskplane.codex_task_executor"
+        )
+    ).strip()
+    resolved_verifier_command = (
+        verifier_command
+        if verifier_command is not None
+        else (
+            os.environ.get("TASKPLANE_STORY_VERIFIER_COMMAND")
+            or "python3 -m taskplane.task_verifier"
+        )
+    ).strip()
+    resolved_force_shell_executor = (
+        force_shell_executor
+        if force_shell_executor is not None
+        else os.environ.get("TASKPLANE_STORY_FORCE_SHELL_EXECUTOR", "")
+        .strip()
+        .lower()
+        in {"1", "true", "yes"}
+    )
+
+    env_prefix = (
         f"export TASKPLANE_DSN={shlex.quote(dsn)}; "
         "export TASKPLANE_OPENCODE_TIMEOUT_SECONDS=1800; "
+        "export TASKPLANE_CODEX_TIMEOUT_SECONDS=1800; "
         "unset GITHUB_TOKEN; "
-        "python3 -m taskplane.story_runner_cli "
+    )
+    if resolved_force_shell_executor:
+        env_prefix += "export TASKPLANE_FORCE_SHELL_EXECUTOR=1; "
+
+    command = (
+        env_prefix
+        + "python3 -m taskplane.story_runner_cli "
         f"--story-issue-number {story_issue_number} "
         f"--worker-name {shlex.quote(f'supervisor-story-{story_issue_number}')} "
         f"--workdir {shlex.quote(str(project_dir))} "
     )
+    if repo is not None and repo.strip():
+        command += f"--repo {shlex.quote(repo.strip())} "
 
     for wave in normalized_allowed_waves:
         command += f"--allowed-wave {shlex.quote(wave)} "
@@ -138,9 +188,9 @@ def build_story_command(
 
     command += (
         "--executor-command "
-        f"{shlex.quote('python3 -m taskplane.codex_task_executor')} "
+        f"{shlex.quote(resolved_executor_command)} "
         "--verifier-command "
-        f"{shlex.quote('python3 -m taskplane.task_verifier')}"
+        f"{shlex.quote(resolved_verifier_command)}"
     )
 
     return command

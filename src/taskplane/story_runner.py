@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import sys
-from typing import Any, Callable
+from typing import Callable
 
 from .git_committer import CommitResult
 from .models import (
     ExecutionGuardrailContext,
+    SESSION_WAITING_STATUSES,
     StoryIntegrationRun,
     StoryPullRequestLink,
     StoryRunResult,
@@ -17,13 +18,16 @@ from .protocols import (
     ExecutorAdapter,
     invoke_story_integrator,
     invoke_story_writeback,
+    SessionManagerProtocol,
     StoryIntegratorAdapter,
     StoryWritebackAdapter,
     VerifierAdapter,
+    WakeupDispatcherProtocol,
     WorkspaceAdapter,
 )
 from .repository import StoryRepository
-from .worker import ExecutionResult, run_worker_cycle
+from .session_protocol import build_session_runtime_adapter
+from .worker import ExecutionResult, WorkerSessionRuntime, run_worker_cycle
 
 
 def run_story_until_settled(
@@ -42,10 +46,18 @@ def run_story_until_settled(
     story_integrator: StoryIntegratorAdapter | None = None,
     workspace_manager: WorkspaceAdapter | None = None,
     max_cycles: int = 100,
-    session_manager: Any | None = None,
-    wakeup_dispatcher: Any | None = None,
+    session_manager: SessionManagerProtocol | None = None,
+    wakeup_dispatcher: WakeupDispatcherProtocol | None = None,
     dsn: str | None = None,
 ) -> StoryRunResult:
+    worker_session_runtime: WorkerSessionRuntime | None = None
+    if session_manager is not None:
+        worker_session_runtime = build_session_runtime_adapter(
+            session_manager=session_manager,
+            wakeup_dispatcher=wakeup_dispatcher,
+            allow_wait_suspension=True,
+        )
+
     for cycle_index in range(max_cycles):
         print(
             f"TRACE story_runner stage=cycle_start story={story_issue_number} cycle={cycle_index}",
@@ -93,7 +105,9 @@ def run_story_until_settled(
             committer=committer,
             work_item_ids=story_work_item_ids,
             workspace_manager=workspace_manager,
-            session_runtime=session_manager if session_manager is not None else True,
+            session_runtime=worker_session_runtime
+            if worker_session_runtime is not None
+            else True,
             dsn=dsn,
         )
         print(
@@ -132,6 +146,35 @@ def run_story_until_settled(
                 story_complete=False,
                 merge_blocked_reason=None,
             )
+        if (
+            cycle_result.claimed_work_id is not None
+            and worker_session_runtime is not None
+        ):
+            sessions = worker_session_runtime.session_manager.list_active_sessions_for_work(
+                cycle_result.claimed_work_id
+            )
+            if any(session.status in SESSION_WAITING_STATUSES for session in sessions):
+                scoped_items = [
+                    repository.get_work_item(work_item_id)
+                    for work_item_id in story_work_item_ids
+                    if _has_work_item(repository, work_item_id)
+                ]
+                return StoryRunResult(
+                    story_issue_number=story_issue_number,
+                    completed_work_item_ids=[
+                        item.id for item in scoped_items if item.status == "done"
+                    ],
+                    blocked_work_item_ids=[
+                        item.id for item in scoped_items if item.status == "blocked"
+                    ],
+                    remaining_work_item_ids=[
+                        item.id
+                        for item in scoped_items
+                        if item.status in {"pending", "ready", "in_progress", "verifying"}
+                    ],
+                    story_complete=False,
+                    merge_blocked_reason=None,
+                )
 
     scoped_items = [
         repository.get_work_item(work_item_id)
@@ -217,14 +260,15 @@ def _finalize_story_result(
             reason_code=verification_failed_reason,
         )
     _write_back_story_issue_status(
-        repository=repository,
         story_issue_number=story_issue_number,
+        scoped_items=scoped_items,
         story_complete=result.story_complete,
         story_github_writeback=story_github_writeback,
     )
     _write_back_story_governance_status(
         repository=repository,
         story_issue_number=story_issue_number,
+        scoped_items=scoped_items,
         story_complete=result.story_complete,
     )
     return result
@@ -266,13 +310,15 @@ def load_story_work_item_ids(
     *,
     repository: StoryRepository,
     story_issue_number: int,
+    repo: str | None = None,
 ) -> list[str]:
     if hasattr(repository, "list_story_work_item_ids"):
-        return repository.list_story_work_item_ids(story_issue_number)
+        return repository.list_story_work_item_ids(story_issue_number, repo=repo)
     matching = [
         work_item.id
         for work_item in repository.list_work_items()
-        if story_issue_number in work_item.story_issue_numbers
+        if (repo is None or work_item.repo is None or work_item.repo == repo)
+        and story_issue_number in work_item.story_issue_numbers
     ]
     return sorted(matching)
 
@@ -287,22 +333,14 @@ def _has_work_item(repository: StoryRepository, work_item_id: str) -> bool:
 
 def _write_back_story_issue_status(
     *,
-    repository: StoryRepository,
     story_issue_number: int,
+    scoped_items: list[WorkItem],
     story_complete: bool,
     story_github_writeback: StoryWritebackAdapter | None,
 ) -> None:
     if story_github_writeback is None or not story_complete:
         return
-    story_items = [
-        item
-        for item in repository.list_work_items()
-        if item.canonical_story_issue_number == story_issue_number
-        or story_issue_number in item.story_issue_numbers
-    ]
-    story_repo = next(
-        (item.repo for item in story_items if item.repo is not None), None
-    )
+    story_repo = next((item.repo for item in scoped_items if item.repo is not None), None)
     if story_repo is None:
         return
     invoke_story_writeback(
@@ -318,19 +356,12 @@ def _write_back_story_governance_status(
     *,
     repository: StoryRepository,
     story_issue_number: int,
+    scoped_items: list[WorkItem],
     story_complete: bool,
 ) -> None:
     if not story_complete:
         return
-    story_items = [
-        item
-        for item in repository.list_work_items()
-        if item.canonical_story_issue_number == story_issue_number
-        or story_issue_number in item.story_issue_numbers
-    ]
-    story_repo = next(
-        (item.repo for item in story_items if item.repo is not None), None
-    )
+    story_repo = next((item.repo for item in scoped_items if item.repo is not None), None)
     if story_repo is None:
         return
     if hasattr(repository, "set_program_story_execution_status_with_propagation"):

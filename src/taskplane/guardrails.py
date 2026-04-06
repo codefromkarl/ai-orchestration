@@ -15,7 +15,7 @@ def evaluate_execution_guardrails(
 ) -> list[GuardrailViolation]:
     violations: list[GuardrailViolation] = []
 
-    if work_item.wave not in context.allowed_waves:
+    if context.allowed_waves and work_item.wave not in context.allowed_waves:
         violations.append(
             GuardrailViolation(
                 code="wave-not-allowed",

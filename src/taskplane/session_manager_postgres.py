@@ -138,11 +138,29 @@ def _row_to_policy_resolution(row: Any) -> PolicyResolutionRecord:
     )
 
 
+def _row_value(row: Any, key: str, default: Any = None) -> Any:
+    if row is None:
+        return default
+    if hasattr(row, key):
+        return getattr(row, key)
+    if isinstance(row, dict):
+        return row.get(key, default)
+    try:
+        return row[key]
+    except (KeyError, TypeError, IndexError):
+        return default
+
+
 class PostgresSessionManager:
     """PostgreSQL-backed session manager."""
 
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+
+    def _commit(self) -> None:
+        commit = getattr(self._connection, "commit", None)
+        if callable(commit):
+            commit()
 
     def create_session(
         self,
@@ -177,6 +195,7 @@ class PostgresSessionManager:
                     now,
                 ),
             )
+        self._commit()
         return ExecutionSession(
             id=session_id,
             work_id=work_id,
@@ -199,6 +218,7 @@ class PostgresSessionManager:
             row = cur.fetchone()
         if row is None:
             return None
+        self._commit()
         return _row_to_session(row)
 
     def update_session_status(
@@ -220,6 +240,7 @@ class PostgresSessionManager:
             row = cur.fetchone()
         if row is None:
             return None
+        self._commit()
         return _row_to_session(row)
 
     def suspend_session(
@@ -277,6 +298,7 @@ class PostgresSessionManager:
                 if row is None:
                     return None
                 return _row_to_session(row)
+        self._commit()
         return _row_to_session(row)
 
     def update_session_phase(
@@ -307,6 +329,7 @@ class PostgresSessionManager:
             row = cur.fetchone()
         if row is None:
             return None
+        self._commit()
         return _row_to_session(row)
 
     def append_checkpoint(
@@ -331,9 +354,16 @@ class PostgresSessionManager:
             )
             phase_index_row = cur.fetchone()
             phase_index = int(
-                phase_index_row[0]
-                if hasattr(phase_index_row, "__getitem__")
-                else phase_index_row.next_index
+                _row_value(
+                    phase_index_row,
+                    "next_index",
+                    phase_index_row[0]
+                    if phase_index_row is not None
+                    and not isinstance(phase_index_row, dict)
+                    and hasattr(phase_index_row, "__getitem__")
+                    else 1,
+                )
+                or 1
             )
             cur.execute(
                 """
@@ -367,6 +397,7 @@ class PostgresSessionManager:
                 """,
                 (ckpt_id, now, session_id),
             )
+        self._commit()
         return ExecutionCheckpoint(
             id=ckpt_id,
             session_id=session_id,
@@ -435,6 +466,7 @@ class PostgresSessionManager:
             row = cur.fetchone()
         if row is None:
             return None
+        self._commit()
         return _row_to_policy_resolution(row)
 
     def get_latest_policy_resolution(
@@ -557,6 +589,7 @@ class PostgresSessionManager:
                     """,
                     (now, session.id),
                 )
+            self._commit()
             self.append_checkpoint(
                 session.id,
                 phase=session.current_phase,

@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from taskplane.models import (
     ExecutionGuardrailContext,
     StoryVerificationRun,
@@ -217,6 +219,150 @@ def test_run_story_until_settled_handles_checkpoint_then_completion():
     assert calls == 2
 
 
+def test_run_story_until_settled_returns_incomplete_when_session_is_suspended():
+    from taskplane.session_manager import InMemorySessionManager
+    from taskplane.wakeup_dispatcher import InMemoryWakeupDispatcher
+
+    repository = InMemoryControlPlaneRepository(
+        work_items=[
+            WorkItem(
+                id="issue-59",
+                title="task 59",
+                lane="Lane 02",
+                wave="wave-2",
+                status="pending",
+            ),
+        ],
+        dependencies=[],
+        targets_by_work_id={
+            "issue-59": [
+                WorkTarget(
+                    work_id="issue-59",
+                    target_path="src/stardrifter_engine/campaign/runtime.py",
+                    target_type="file",
+                    owner_lane="Lane 02",
+                    is_frozen=False,
+                    requires_human_approval=False,
+                )
+            ],
+        },
+    )
+    context = ExecutionGuardrailContext(
+        allowed_waves={"wave-2"},
+        frozen_prefixes=("docs/authority/",),
+    )
+    session_manager = InMemorySessionManager()
+    wakeup_dispatcher = InMemoryWakeupDispatcher()
+    calls = 0
+
+    def executor(work_item, workspace_path=None, execution_context=None):
+        nonlocal calls
+        calls += 1
+        return ExecutionResult(
+            success=True,
+            summary="waiting for external event",
+            result_payload_json={
+                "execution_kind": "wait",
+                "wait_type": "external_event",
+                "summary": "waiting for operator event",
+                "resume_hint": "resume on external event",
+            },
+        )
+
+    result = run_story_until_settled(
+        story_issue_number=24,
+        story_work_item_ids=["issue-59"],
+        repository=repository,
+        context=context,
+        worker_name="worker-a",
+        executor=executor,
+        verifier=lambda work_item, workspace_path=None, execution_context=None: VerificationEvidence(
+            work_id=work_item.id,
+            check_type="pytest",
+            command="python3 -m pytest -q",
+            passed=True,
+            output_digest="ok",
+        ),
+        committer=None,
+        session_manager=session_manager,
+        wakeup_dispatcher=wakeup_dispatcher,
+    )
+
+    assert result.story_complete is False
+    assert result.remaining_work_item_ids == ["issue-59"]
+    assert calls == 1
+    sessions = session_manager.list_active_sessions_for_work("issue-59")
+    assert len(sessions) == 1
+    assert sessions[0].status == "suspended"
+
+
+def test_run_story_until_settled_wraps_session_manager_into_explicit_runtime_adapter(
+    monkeypatch,
+):
+    from taskplane.session_manager import InMemorySessionManager
+
+    repository = InMemoryControlPlaneRepository(
+        work_items=[
+            WorkItem(
+                id="issue-59b",
+                title="task 59b",
+                lane="Lane 02",
+                wave="wave-2",
+                status="pending",
+            ),
+        ],
+        dependencies=[],
+        targets_by_work_id={
+            "issue-59b": [
+                WorkTarget(
+                    work_id="issue-59b",
+                    target_path="src/stardrifter_engine/campaign/runtime.py",
+                    target_type="file",
+                    owner_lane="Lane 02",
+                    is_frozen=False,
+                    requires_human_approval=False,
+                )
+            ],
+        },
+    )
+    context = ExecutionGuardrailContext(
+        allowed_waves={"wave-2"},
+        frozen_prefixes=("docs/authority/",),
+    )
+    captured: dict[str, object] = {}
+
+    def fake_run_worker_cycle(**kwargs):
+        captured["session_runtime"] = kwargs.get("session_runtime")
+        return SimpleNamespace(claimed_work_id=None)
+
+    monkeypatch.setattr(story_runner_module, "run_worker_cycle", fake_run_worker_cycle)
+
+    result = run_story_until_settled(
+        story_issue_number=24,
+        story_work_item_ids=["issue-59b"],
+        repository=repository,
+        context=context,
+        worker_name="worker-a",
+        executor=lambda work_item, workspace_path=None, execution_context=None: (
+            ExecutionResult(success=True, summary="noop")
+        ),
+        verifier=lambda work_item, workspace_path=None, execution_context=None: VerificationEvidence(
+            work_id=work_item.id,
+            check_type="pytest",
+            command="python3 -m pytest -q",
+            passed=True,
+            output_digest="ok",
+        ),
+        committer=None,
+        session_manager=InMemorySessionManager(),
+    )
+
+    assert result.story_complete is False
+    assert isinstance(
+        captured["session_runtime"], story_runner_module.WorkerSessionRuntime
+    )
+
+
 def test_run_story_until_settled_does_not_mark_empty_story_as_complete():
     repository = InMemoryControlPlaneRepository(
         work_items=[],
@@ -248,7 +394,99 @@ def test_run_story_until_settled_does_not_mark_empty_story_as_complete():
     )
 
     assert result.story_complete is False
-    assert result.completed_work_item_ids == []
+
+
+def test_load_story_work_item_ids_filters_by_repo_when_supported():
+    repository = InMemoryControlPlaneRepository(
+        work_items=[
+            WorkItem(
+                id="demo-1",
+                title="demo task",
+                lane="Lane 01",
+                wave="wave-1",
+                status="pending",
+                repo="demo/taskplane",
+                canonical_story_issue_number=105,
+                story_issue_numbers=(105,),
+            ),
+            WorkItem(
+                id="other-1",
+                title="foreign task",
+                lane="Lane 01",
+                wave="wave-1",
+                status="pending",
+                repo="codefromkarl/stardrifter",
+                canonical_story_issue_number=105,
+                story_issue_numbers=(105,),
+            ),
+        ],
+        dependencies=[],
+        targets_by_work_id={},
+    )
+
+    scoped = story_runner_module.load_story_work_item_ids(
+        repository=repository,
+        repo="demo/taskplane",
+        story_issue_number=105,
+    )
+
+    assert scoped == ["demo-1"]
+
+
+def test_finalize_story_result_uses_scoped_items_for_writeback_repo():
+    repository = InMemoryControlPlaneRepository(
+        work_items=[
+            WorkItem(
+                id="demo-1",
+                title="demo task",
+                lane="Lane 01",
+                wave="wave-1",
+                status="done",
+                repo="demo/taskplane",
+                canonical_story_issue_number=105,
+                story_issue_numbers=(105,),
+            ),
+            WorkItem(
+                id="other-1",
+                title="foreign task",
+                lane="Lane 01",
+                wave="wave-1",
+                status="done",
+                repo="codefromkarl/stardrifter",
+                canonical_story_issue_number=105,
+                story_issue_numbers=(105,),
+            ),
+        ],
+        dependencies=[],
+        targets_by_work_id={},
+    )
+    writebacks: list[tuple[str, int, str, bool]] = []
+
+    class StoryWriteback:
+        def write_back(
+            self,
+            *,
+            repo: str,
+            issue_number: int,
+            status: str,
+            decision_required: bool,
+        ) -> None:
+            writebacks.append((repo, issue_number, status, decision_required))
+
+    result = story_runner_module._finalize_story_result(
+        repository=repository,
+        story_issue_number=105,
+        scoped_items=[repository.get_work_item("demo-1")],
+        completed_ids=["demo-1"],
+        blocked_ids=[],
+        story_github_writeback=StoryWriteback(),
+        story_integrator=None,
+        story_verifier=None,
+    )
+
+    assert result.story_complete is True
+    assert writebacks == [("demo/taskplane", 105, "done", False)]
+    assert result.completed_work_item_ids == ["demo-1"]
     assert result.remaining_work_item_ids == []
 
 

@@ -32,6 +32,7 @@ from ._worker_queue_preparation import (
     _run_preflight_checks,
 )
 from .dead_letter_queue import DeadLetterQueue
+from .execution_protocol import classify_execution_payload
 from .git_committer import CommitResult
 from .models import (
     ApprovalEvent,
@@ -52,18 +53,19 @@ from .protocols import (
     SessionManagerProtocol,
     TaskWritebackAdapter,
     VerifierAdapter,
-    WakeupDispatcherProtocol,
     WorkspaceAdapter,
 )
 from .repository import WorkerRepository
 from .resume_context_builder import build_store_backed_resume_context_builder
-from .session_manager import InMemorySessionManager
 from .session_runtime_loop import (
     ExecutorResult as SessionExecutorResult,
     SessionTurnRequest,
     run_session_to_completion,
 )
-from .wakeup_dispatcher import InMemoryWakeupDispatcher
+from .session_protocol import (
+    SessionRuntimeAdapter,
+    coerce_session_runtime_adapter,
+)
 from .workspace import build_workspace_spec
 
 ALREADY_SATISFIED_OUTCOME = "already_satisfied"
@@ -147,12 +149,7 @@ class WorkerCycleResult:
     claimed_work_id: str | None
 
 
-@dataclass(frozen=True)
-class WorkerSessionRuntime:
-    session_manager: SessionManagerProtocol
-    wakeup_dispatcher: WakeupDispatcherProtocol
-    max_iterations: int = DEFAULT_SESSION_MAX_ITERATIONS
-    resume_context_builder: Callable[[ExecutionSession], str] | None = None
+WorkerSessionRuntime = SessionRuntimeAdapter
 
 
 def run_worker_cycle(
@@ -167,7 +164,7 @@ def run_worker_cycle(
     github_writeback: TaskWritebackAdapter | None = None,
     work_item_ids: list[str] | None = None,
     workspace_manager: WorkspaceAdapter | None = None,
-    session_runtime: Any | None = None,
+    session_runtime: WorkerSessionRuntime | SessionManagerProtocol | bool | None = None,
     dsn: str | None = None,
 ) -> WorkerCycleResult:
     queue_preparation = _prepare_worker_queue(
@@ -410,6 +407,7 @@ def run_worker_cycle(
                 already_satisfied=already_satisfied,
                 existing_commit_link=existing_commit_link,
                 commit_result=commit_result,
+                result_payload_json=result_payload_json,
             )
         )
 
@@ -519,24 +517,12 @@ def _best_effort_prewarm_story_workspaces(
         )
 
 
-def _coerce_session_runtime(session_runtime: Any | None) -> WorkerSessionRuntime | None:
-    if session_runtime in (None, False):
-        return None
-    if isinstance(session_runtime, WorkerSessionRuntime):
-        return session_runtime
-    if hasattr(session_runtime, "create_session") and hasattr(
-        session_runtime, "build_resume_context"
-    ):
-        return WorkerSessionRuntime(
-            session_manager=session_runtime,
-            wakeup_dispatcher=InMemoryWakeupDispatcher(),
-            resume_context_builder=getattr(
-                session_runtime, "resume_context_builder", None
-            ),
-        )
-    return WorkerSessionRuntime(
-        session_manager=InMemorySessionManager(),
-        wakeup_dispatcher=InMemoryWakeupDispatcher(),
+def _coerce_session_runtime(
+    session_runtime: WorkerSessionRuntime | SessionManagerProtocol | bool | None,
+) -> WorkerSessionRuntime | None:
+    return coerce_session_runtime_adapter(
+        session_runtime,
+        max_iterations=DEFAULT_SESSION_MAX_ITERATIONS,
     )
 
 
@@ -559,7 +545,7 @@ def _run_executor_with_optional_session_runtime(
     work_item: WorkItem,
     workspace_path: Path | None,
     execution_context: ExecutionContext,
-    session_runtime: Any | None,
+    session_runtime: WorkerSessionRuntime | SessionManagerProtocol | bool | None,
     dsn: str | None,
 ) -> ExecutionResult:
     runtime = _coerce_session_runtime(session_runtime)
@@ -605,7 +591,8 @@ def _run_executor_with_optional_session_runtime(
                     "resume_candidate" if request.resume_context else "fresh_session"
                 ),
                 resume_hint=request.current_phase,
-                resume_context=request.resume_context or execution_context.resume_context,
+                resume_context=request.resume_context
+                or execution_context.resume_context,
             )
             result = _run_executor_with_heartbeat(
                 executor=executor,
@@ -635,7 +622,7 @@ def _run_executor_with_optional_session_runtime(
         resume_context_builder=resume_context_builder,
         policy_engine_fn=evaluate_policy,
         max_iterations=runtime.max_iterations,
-        wait_fn=lambda **kwargs: True,
+        wait_fn=None if runtime.allow_wait_suspension else lambda **kwargs: True,
     )
     return _materialize_session_result(
         completion=completion,
@@ -722,7 +709,9 @@ def _materialize_session_result(
     if not payload:
         payload = {
             "outcome": "blocked",
-            "summary": checkpoint.summary if checkpoint is not None else "executor session blocked",
+            "summary": checkpoint.summary
+            if checkpoint is not None
+            else "executor session blocked",
             "reason_code": "session-runtime-blocked",
             "decision_required": completion.final_status == "human_required",
         }
@@ -730,7 +719,9 @@ def _materialize_session_result(
         payload.setdefault("outcome", "blocked")
         payload.setdefault(
             "summary",
-            checkpoint.summary if checkpoint is not None else last_execution_result.summary,
+            checkpoint.summary
+            if checkpoint is not None
+            else last_execution_result.summary,
         )
         payload.setdefault(
             "reason_code",
@@ -840,12 +831,19 @@ def _build_post_verification_outcome(
     already_satisfied: bool,
     existing_commit_link: dict[str, Any] | None,
     commit_result: CommitResult | None,
+    result_payload_json: dict[str, Any] | None = None,
 ) -> tuple[WorkStatus, str | None, bool]:
     final_status: WorkStatus = "done" if verification_passed else "blocked"
     blocked_reason = None if verification_passed else verification_output_digest
     final_decision_required = approval_required
 
     if verification_passed:
+        if classify_execution_payload(result_payload_json or {}) in {
+            "checkpoint",
+            "wait",
+            "retry_intent",
+        }:
+            return ("pending", None, final_decision_required)
         if existing_commit_link is not None and not already_satisfied:
             return ("blocked", "duplicate_canonical_commit", final_decision_required)
         if commit_result is not None:
@@ -871,6 +869,35 @@ def _build_failure_finalization(
     current_attempt_count: int,
     branch_name: str | None,
 ) -> dict[str, Any]:
+    continuation_kind = classify_execution_payload(
+        execution_result.result_payload_json or {}
+    )
+    if continuation_kind in {"checkpoint", "wait", "retry_intent"}:
+        payload = execution_result.result_payload_json or {}
+        failure_status: WorkStatus = "pending"
+        execution_run = ExecutionRun(
+            work_id=claimed_work_id,
+            worker_name=worker_name,
+            status=failure_status,
+            branch_name=branch_name,
+            command_digest=execution_result.command_digest,
+            summary=execution_result.summary,
+            exit_code=execution_result.exit_code,
+            elapsed_ms=execution_result.elapsed_ms,
+            stdout_digest=execution_result.stdout_digest,
+            stderr_digest=execution_result.stderr_digest,
+            result_payload_json=execution_result.result_payload_json,
+        )
+        return {
+            "status": failure_status,
+            "blocked_reason": None,
+            "decision_required": False,
+            "attempt_count": current_attempt_count,
+            "last_failure_reason": None,
+            "next_eligible_at": payload.get("wake_after") or payload.get("scheduled_at"),
+            "execution_run": execution_run,
+        }
+
     (
         failure_status,
         blocked_reason,
@@ -917,9 +944,7 @@ def _extract_changed_paths(result_payload_json: dict[str, Any] | None) -> list[s
     if not isinstance(payload_changed_paths, list):
         return []
     return [
-        path
-        for path in payload_changed_paths
-        if isinstance(path, str) and path.strip()
+        path for path in payload_changed_paths if isinstance(path, str) and path.strip()
     ]
 
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import time
 from pathlib import Path
+from typing import Any
 
 import psycopg
 from psycopg.rows import dict_row
@@ -16,9 +17,19 @@ from psycopg.rows import dict_row
 from .scheduling_loop import run_supervisor_iteration
 
 
-def main() -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    connect_fn=None,
+    runtime_builder=None,
+    supervisor_iteration=run_supervisor_iteration,
+    sleep_fn=time.sleep,
+    run_once: bool = False,
+) -> int:
     """Main entry point for the supervisor CLI."""
-    args = _build_parser().parse_args()
+    args = _build_parser().parse_args(argv)
+    connector = connect_fn or psycopg.connect
+    build_runtime = runtime_builder or _build_postgres_runtime
     log_dir = Path(args.log_dir).resolve()
     log_dir.mkdir(parents=True, exist_ok=True)
     project_dir = Path(args.project_dir).resolve()
@@ -29,8 +40,13 @@ def main() -> int:
     running_processes: dict[int, ManagedProcess] = {}
 
     while True:
-        with psycopg.connect(args.dsn, row_factory=dict_row) as conn:
-            launched = run_supervisor_iteration(
+        with connector(args.dsn, row_factory=dict_row) as conn:
+            session_manager = None
+            wakeup_dispatcher = None
+            runtime_components = build_runtime(conn)
+            if runtime_components is not None:
+                session_manager, wakeup_dispatcher = runtime_components
+            launched = supervisor_iteration(
                 connection=conn,
                 repo=args.repo,
                 dsn=args.dsn,
@@ -42,9 +58,16 @@ def main() -> int:
                 epic_story_batch_size=args.epic_story_batch_size,
                 launcher=_launch_managed_process,
                 running_processes=running_processes,
+                session_manager=session_manager,
+                wakeup_dispatcher=wakeup_dispatcher,
+                story_executor_command=args.story_executor_command,
+                story_verifier_command=args.story_verifier_command,
+                story_force_shell_executor=args.story_force_shell_executor,
             )
+        if run_once:
+            return 0
         if launched == 0:
-            time.sleep(args.poll_interval)
+            sleep_fn(args.poll_interval)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -62,7 +85,27 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--poll-interval", type=int, default=15)
     parser.add_argument("--max-parallel-jobs", type=int, default=2)
     parser.add_argument("--epic-story-batch-size", type=int, default=1)
+    parser.add_argument("--story-executor-command")
+    parser.add_argument("--story-verifier-command")
+    parser.add_argument(
+        "--story-force-shell-executor",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
     return parser
+
+
+def _build_postgres_runtime(connection: Any) -> tuple[Any, Any] | None:
+    try:
+        from .session_manager_postgres import PostgresSessionManager
+        from .wakeup_dispatcher import PostgresWakeupDispatcher
+
+        return (
+            PostgresSessionManager(connection),
+            PostgresWakeupDispatcher(connection),
+        )
+    except Exception:
+        return None
 
 
 def _launch_managed_process(command: str, log_path: Path) -> ManagedProcess:
