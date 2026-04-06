@@ -352,7 +352,7 @@ class FileIndexRegistry:
         )
 
 
-def ensure_contextweaver_index_for_checkout(
+def ensure_contextatlas_index_for_checkout(
     project_dir: Path,
     *,
     explicit_repo: str | None = None,
@@ -393,8 +393,8 @@ def ensure_contextweaver_index_for_checkout(
         if observed is not None and observed.status == "ready":
             return None
         if observed is not None and observed.status == "failed":
-            return observed.last_error or "contextweaver index failed"
-        return "timed out waiting for contextweaver snapshot build lock"
+            return observed.last_error or "contextatlas index failed"
+        return "timed out waiting for contextatlas snapshot build lock"
     try:
         existing = registry.get_artifact(
             repository_id=identity.repository_id,
@@ -404,7 +404,7 @@ def ensure_contextweaver_index_for_checkout(
         if existing is not None and existing.status == "ready":
             return None
         registry.mark_building(identity)
-        error = _run_contextweaver_index(identity.project_dir)
+        error = _run_contextatlas_index(identity.project_dir)
         if error is None:
             registry.mark_ready(identity)
         else:
@@ -446,16 +446,14 @@ def resolve_repository_identity(
 
 
 def _default_registry_path() -> Path:
-    override = os.environ.get("TASKPLANE_CONTEXTWEAVER_REGISTRY_PATH", "").strip()
+    override = os.environ.get("TASKPLANE_CONTEXTATLAS_REGISTRY_PATH", "").strip()
     if override:
         return Path(override).expanduser().resolve()
-    return Path.home() / ".cache" / "contextweaver" / "registry.json"
+    return Path.home() / ".cache" / "contextatlas" / "registry.json"
 
 
 def _skip_indexing_enabled() -> bool:
-    return os.environ.get(
-        "TASKPLANE_SKIP_CONTEXTWEAVER_INDEX", ""
-    ).strip().lower() in {
+    return os.environ.get("TASKPLANE_SKIP_CONTEXTWEAVER_INDEX", "").strip().lower() in {
         "1",
         "true",
         "yes",
@@ -463,7 +461,7 @@ def _skip_indexing_enabled() -> bool:
 
 
 def _load_lock_wait_seconds() -> float:
-    raw = os.environ.get("TASKPLANE_CONTEXTWEAVER_LOCK_WAIT_SECONDS", "5").strip()
+    raw = os.environ.get("TASKPLANE_CONTEXTATLAS_LOCK_WAIT_SECONDS", "5").strip()
     try:
         value = float(raw)
     except ValueError:
@@ -474,7 +472,7 @@ def _load_lock_wait_seconds() -> float:
 
 
 def _load_lock_poll_seconds() -> float:
-    raw = os.environ.get("TASKPLANE_CONTEXTWEAVER_LOCK_POLL_SECONDS", "0.05").strip()
+    raw = os.environ.get("TASKPLANE_CONTEXTATLAS_LOCK_POLL_SECONDS", "0.05").strip()
     try:
         value = float(raw)
     except ValueError:
@@ -485,7 +483,7 @@ def _load_lock_poll_seconds() -> float:
 
 
 def _load_lock_stale_seconds() -> float:
-    raw = os.environ.get("TASKPLANE_CONTEXTWEAVER_LOCK_STALE_SECONDS", "30").strip()
+    raw = os.environ.get("TASKPLANE_CONTEXTATLAS_LOCK_STALE_SECONDS", "30").strip()
     try:
         value = float(raw)
     except ValueError:
@@ -570,9 +568,9 @@ def _compute_dirty_snapshot_fingerprint(repo_root: Path) -> str:
     return digest.hexdigest()[:16]
 
 
-def _run_contextweaver_index(project_dir: Path) -> str | None:
+def _run_contextatlas_index(project_dir: Path) -> str | None:
     completed = subprocess.run(
-        ["contextweaver", "index", str(project_dir)],
+        ["contextatlas", "index", str(project_dir)],
         cwd=str(project_dir),
         capture_output=True,
         text=True,
