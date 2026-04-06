@@ -87,6 +87,7 @@ sql/
 ### 架构与边界
 
 - `docs/architecture-overview.md`
+- `docs/agent-harness-target-architecture.md`
 - `docs/substrate-architecture.md`
 - `docs/architecture-data-consistency-analysis.md`
 - `docs/adr/0001-engineering-boundaries.md`

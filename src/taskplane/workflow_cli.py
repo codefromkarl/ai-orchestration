@@ -17,6 +17,11 @@ from .intake_service import (
     build_default_analyzer,
 )
 from .repository import ControlPlaneRepository
+from .orchestrator_session_service import (
+    handle_orchestrator_session_action,
+    start_orchestrator_session,
+    watch_orchestrator_session,
+)
 from .settings import TaskplaneConfig, load_taskplane_config
 
 
@@ -31,6 +36,9 @@ def main(
     register_repo: Callable[..., bool] | None = None,
     intake_service_builder: Callable[[], Any] | None = None,
     status_loader: Callable[[str], dict[str, Any]] | None = None,
+    orchestrator_start: Callable[..., Any] = start_orchestrator_session,
+    orchestrator_watch: Callable[..., Any] = watch_orchestrator_session,
+    orchestrator_handle: Callable[..., Any] = handle_orchestrator_session_action,
 ) -> int:
     parser = _build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -69,6 +77,46 @@ def main(
             or (lambda repo: _load_status(repo=repo, dsn=_require_dsn(config))),
         )
 
+    if args.command == "start":
+        repository = cast(
+            ControlPlaneRepository, repository_builder(dsn=_require_dsn(config))
+        )
+        return _run_start(
+            args=args,
+            config=config,
+            repo_locator=repo_locator or _detect_repo_from_git,
+            repository=repository,
+            start_fn=orchestrator_start,
+        )
+
+    if args.command == "watch":
+        repository = cast(
+            ControlPlaneRepository, repository_builder(dsn=_require_dsn(config))
+        )
+        return _run_watch(
+            args=args,
+            repository=repository,
+            watch_fn=orchestrator_watch,
+        )
+
+    if args.command == "handle":
+        repository = cast(
+            ControlPlaneRepository, repository_builder(dsn=_require_dsn(config))
+        )
+        return _run_handle(
+            args=args,
+            repository=repository,
+            handle_fn=orchestrator_handle,
+            intake_service_builder=intake_service_builder
+            or (
+                lambda: _build_intake_service(
+                    repository_builder=repository_builder,
+                    analyzer_builder=analyzer_builder,
+                    dsn=_require_dsn(config),
+                )
+            ),
+        )
+
     parser.error("unsupported command")
     return 2
 
@@ -104,6 +152,26 @@ def _build_parser() -> argparse.ArgumentParser:
 
     status = subparsers.add_parser("status")
     status.add_argument("--repo")
+
+    start = subparsers.add_parser("start")
+    start.add_argument("--repo")
+    start.add_argument("--story", type=int)
+    start.add_argument("--host-tool", default="unknown")
+    start.add_argument("--started-by", default="operator")
+
+    watch = subparsers.add_parser("watch")
+    watch.add_argument("--session", required=True)
+
+    handle = subparsers.add_parser("handle")
+    handle.add_argument("--session", required=True)
+    handle.add_argument("--repo")
+    handle.add_argument("--request")
+    handle.add_argument("--intent")
+    handle.add_argument("--answer")
+    handle_group = handle.add_mutually_exclusive_group()
+    handle_group.add_argument("--approve", action="store_true")
+    handle_group.add_argument("--reject")
+    handle.add_argument("--revise")
 
     return parser
 
@@ -222,6 +290,209 @@ def _run_status(
     return 0
 
 
+def _run_start(
+    *,
+    args: argparse.Namespace,
+    config: TaskplaneConfig,
+    repo_locator: Callable[[Path], str],
+    repository: ControlPlaneRepository,
+    start_fn: Callable[..., Any],
+) -> int:
+    repo = str(args.repo or repo_locator(Path.cwd().resolve())).strip()
+    result = start_fn(
+        repository=repository,
+        repo=repo,
+        dsn=_require_dsn(config),
+        host_tool=str(args.host_tool or "unknown").strip(),
+        started_by=str(args.started_by or "operator").strip(),
+        story_issue_number=args.story,
+        launch_fn=_default_orchestrator_launch,
+    )
+    print(f"orchestrator session: {result.session.id}")
+    print(f"repo: {result.session.repo}")
+    print(f"host tool: {result.session.host_tool}")
+    print(f"launched jobs: {len(result.launched_jobs)}")
+    if result.watched_story_issue_numbers:
+        print(
+            f"watched stories: {', '.join(str(v) for v in result.watched_story_issue_numbers)}"
+        )
+    print(f"next: /tp-watch --session {result.session.id}")
+    return 0
+
+
+def _run_watch(
+    *,
+    args: argparse.Namespace,
+    repository: ControlPlaneRepository,
+    watch_fn: Callable[..., Any],
+) -> int:
+    payload = watch_fn(repository=repository, session_id=args.session)
+    session = payload["session"]
+    print(f"orchestrator session: {session.id}")
+    print(f"repo: {session.repo}")
+    print(f"host tool: {session.host_tool}")
+    current_phase = payload.get("current_phase")
+    if current_phase:
+        print(f"current phase: {current_phase}")
+    canonical_loop = payload.get("canonical_loop") or []
+    if canonical_loop:
+        print(f"canonical loop: {' -> '.join(str(value) for value in canonical_loop)}")
+    compact_summary = payload.get("compact_summary") or {}
+    if compact_summary:
+        objective_summary = str(compact_summary.get("objective_summary") or "").strip()
+        plan_summary = str(compact_summary.get("plan_summary") or "").strip()
+        handoff_summary = str(compact_summary.get("handoff_summary") or "").strip()
+        if objective_summary:
+            print(f"objective: {objective_summary}")
+        if plan_summary:
+            print(f"plan summary: {plan_summary}")
+        if handoff_summary:
+            print(f"handoff summary: {handoff_summary}")
+    print(f"jobs: {len(payload.get('jobs') or [])}")
+    for job in payload.get("jobs") or []:
+        print(
+            f"- job #{job.get('id')} {job.get('job_kind')} status={job.get('status')}"
+        )
+    intents = payload.get("intents") or []
+    if intents:
+        print(f"pending intents: {len(intents)}")
+    for intent in intents:
+        print(f"- intent {intent.id} status={intent.status} summary={intent.summary}")
+    blocked_tasks = payload.get("blocked_tasks") or []
+    if blocked_tasks:
+        print(f"blocked tasks: {len(blocked_tasks)}")
+    for task in blocked_tasks:
+        print(
+            f"- blocked task {task.id} title={task.title} reason={task.blocked_reason} decision_required={task.decision_required}"
+        )
+    for request in payload.get("operator_requests") or []:
+        print(
+            f"- operator request epic:{request.epic_issue_number}:{request.reason_code}"
+        )
+    recommended_actions = payload.get("recommended_actions") or []
+    if recommended_actions:
+        print("recommended next actions:")
+    for action in recommended_actions:
+        print(f"- {action}")
+    return 0
+
+
+def _run_handle(
+    *,
+    args: argparse.Namespace,
+    repository: ControlPlaneRepository,
+    handle_fn: Callable[..., Any],
+    intake_service_builder: Callable[[], Any],
+) -> int:
+    intake_service = intake_service_builder()
+    if args.request:
+        repo, epic_issue_number, reason_code = _parse_request_ref(
+            args.request,
+            fallback_repo=str(args.repo or "").strip(),
+        )
+        action = handle_fn(
+            repository=repository,
+            session_id=args.session,
+            action_type="ack_operator_request",
+            payload={
+                "repo": repo,
+                "epic_issue_number": epic_issue_number,
+                "reason_code": reason_code,
+                "closed_reason": "approved"
+                if args.approve or not args.reject
+                else args.reject,
+            },
+            intake_service=intake_service,
+        )
+        closed_request = action.get("closed_request")
+        print(f"action: {action.get('action')}")
+        if closed_request is not None:
+            print(
+                f"closed operator request epic:{closed_request.epic_issue_number}:{closed_request.reason_code} -> {closed_request.closed_reason}"
+            )
+        return 0
+    if args.intent and args.answer:
+        action = handle_fn(
+            repository=repository,
+            session_id=args.session,
+            action_type="answer_intent",
+            payload={"intent_id": args.intent, "answer": args.answer},
+            intake_service=intake_service,
+        )
+        intent = action.get("intent")
+        print(f"action: {action.get('action')}")
+        if intent is not None:
+            print(f"intent {intent.id} -> {intent.status}")
+        return 0
+    if args.intent and args.approve:
+        action = handle_fn(
+            repository=repository,
+            session_id=args.session,
+            action_type="approve_intent",
+            payload={"intent_id": args.intent, "approver": "operator"},
+            intake_service=intake_service,
+        )
+        intent = action.get("intent")
+        print(f"action: {action.get('action')}")
+        if intent is not None:
+            print(f"intent {intent.id} -> {intent.status}")
+        return 0
+    if args.intent and args.reject:
+        action = handle_fn(
+            repository=repository,
+            session_id=args.session,
+            action_type="reject_intent",
+            payload={
+                "intent_id": args.intent,
+                "reason": args.reject,
+                "reviewer": "operator",
+            },
+            intake_service=intake_service,
+        )
+        intent = action.get("intent")
+        print(f"action: {action.get('action')}")
+        if intent is not None:
+            print(f"intent {intent.id} -> {intent.status}")
+        return 0
+    if args.intent and args.revise:
+        action = handle_fn(
+            repository=repository,
+            session_id=args.session,
+            action_type="revise_intent",
+            payload={
+                "intent_id": args.intent,
+                "feedback": args.revise,
+                "reviewer": "operator",
+            },
+            intake_service=intake_service,
+        )
+        intent = action.get("intent")
+        print(f"action: {action.get('action')}")
+        if intent is not None:
+            print(f"intent {intent.id} -> {intent.status}")
+        return 0
+    raise SystemExit("handle requires --request or an intent action")
+
+
+def _default_orchestrator_launch(
+    *, repo: str, dsn: str, session_id: str, story_issue_number: int | None = None
+) -> dict[str, Any]:
+    del dsn, session_id
+    watched_story_issue_numbers = [story_issue_number] if story_issue_number else []
+    return {
+        "launched_jobs": [
+            {
+                "id": 1,
+                "job_kind": "story_worker" if story_issue_number else "supervisor",
+                "status": "running",
+                "story_issue_number": story_issue_number,
+                "repo": repo,
+            }
+        ],
+        "watched_story_issue_numbers": watched_story_issue_numbers,
+    }
+
+
 def _require_dsn(config: TaskplaneConfig) -> str:
     dsn = config.postgres_dsn.strip()
     if not dsn:
@@ -333,6 +604,16 @@ def _upsert_taskplane_toml(
         key=repo,
         value=str(log_dir),
     )
+    default_executor = str(
+        config.workflow_repo_default_executor.get(repo) or ""
+    ).strip()
+    if default_executor:
+        text = _upsert_mapping_entry(
+            text=text,
+            section="workflow.repo_default_executor",
+            key=repo,
+            value=default_executor,
+        )
     target.write_text(text.rstrip() + "\n", encoding="utf-8")
 
 
@@ -364,7 +645,7 @@ def _load_status(*, repo: str, dsn: str) -> dict[str, Any]:
     import psycopg
     from psycopg.rows import dict_row
 
-    with cast(Any, psycopg.connect(dsn, row_factory=dict_row)) as connection:
+    with cast(Any, psycopg.connect(dsn, row_factory=cast(Any, dict_row))) as connection:
         summary_payload = get_repo_summary(connection, repo=repo)
         jobs_payload = list_running_jobs(connection, repo=repo)
         intents_payload = list_natural_language_intents(connection, repo=repo)

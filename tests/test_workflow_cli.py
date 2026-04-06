@@ -250,3 +250,236 @@ def test_workflow_status_summarizes_running_blocked_and_human_actions(capsys):
     assert '/tp-intake intent=intent-1 answer="..."' in output
     assert "/tp-intake intent=intent-2 approve" in output
     assert "/tp-intake request=epic:42:progress_timeout approve" in output
+
+
+def test_workflow_link_writes_repo_default_executor_when_configured(
+    tmp_path, monkeypatch
+):
+    from taskplane.workflow_cli import main
+    from taskplane.settings import TaskplaneConfig
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    config_path = tmp_path / "taskplane.toml"
+    config_path.write_text(
+        """
+[postgres]
+dsn = "postgresql://user:pass@localhost:5432/taskplane"
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo_dir)
+
+    def fake_repo_locator(cwd: Path) -> str:
+        assert cwd == repo_dir
+        return "owner/repo"
+
+    def fake_connector(dsn: str):
+        assert dsn == "postgresql://user:pass@localhost:5432/taskplane"
+        return object()
+
+    exit_code = main(
+        ["link"],
+        config_loader=lambda: TaskplaneConfig(
+            source_path=config_path,
+            postgres_dsn="postgresql://user:pass@localhost:5432/taskplane",
+            workflow_repo_default_executor={"owner/repo": "opencode"},
+        ),
+        repo_locator=fake_repo_locator,
+        connector=fake_connector,
+        register_repo=lambda *args, **kwargs: True,
+    )
+
+    assert exit_code == 0
+    config_text = config_path.read_text(encoding="utf-8")
+    assert "[workflow.repo_default_executor]" in config_text
+    assert '"owner/repo" = "opencode"' in config_text
+
+
+def test_workflow_start_uses_orchestrator_service(monkeypatch, capsys):
+    from taskplane.workflow_cli import main
+    from taskplane.settings import TaskplaneConfig
+
+    captured: dict[str, object] = {}
+
+    class SessionStub:
+        id = "orch-1"
+        repo = "owner/repo"
+        host_tool = "claude_code"
+
+    def fake_start(**kwargs):
+        captured.update(kwargs)
+        return type(
+            "StartResult",
+            (),
+            {
+                "session": SessionStub(),
+                "launched_jobs": [{"id": 11, "job_kind": "story_worker"}],
+                "watched_story_issue_numbers": [123],
+            },
+        )()
+
+    exit_code = main(
+        ["start", "--repo", "owner/repo", "--host-tool", "claude_code"],
+        config_loader=lambda: TaskplaneConfig(
+            postgres_dsn="postgresql://user:pass@localhost:5432/taskplane"
+        ),
+        repository_builder=lambda **kwargs: object(),
+        orchestrator_start=fake_start,
+    )
+
+    assert exit_code == 0
+    assert captured["repo"] == "owner/repo"
+    assert captured["host_tool"] == "claude_code"
+    assert "orch-1" in capsys.readouterr().out
+
+
+def test_workflow_watch_uses_orchestrator_service(capsys):
+    from taskplane.workflow_cli import main
+    from taskplane.settings import TaskplaneConfig
+
+    class SessionStub:
+        id = "orch-1"
+        repo = "owner/repo"
+        host_tool = "claude_code"
+
+    exit_code = main(
+        ["watch", "--session", "orch-1"],
+        config_loader=lambda: TaskplaneConfig(
+            postgres_dsn="postgresql://user:pass@localhost:5432/taskplane"
+        ),
+        repository_builder=lambda **kwargs: object(),
+        orchestrator_watch=lambda **kwargs: {
+            "session": SessionStub(),
+            "current_phase": "verify",
+            "canonical_loop": [
+                "observe",
+                "plan",
+                "act",
+                "verify",
+                "decide_next",
+            ],
+            "compact_summary": {
+                "objective_summary": "Advance repo owner/repo through orchestrator session",
+                "plan_summary": "Validate current story execution and pending operator work before deciding the next action.",
+                "handoff_summary": "1 blocked task(s), 1 pending intent(s), 1 running job(s).",
+            },
+            "jobs": [{"id": 11, "status": "running", "job_kind": "story_worker"}],
+            "blocked_tasks": [
+                type(
+                    "BlockedTask",
+                    (),
+                    {
+                        "id": "task-1",
+                        "title": "Needs operator decision",
+                        "blocked_reason": "waiting_operator",
+                        "decision_required": True,
+                    },
+                )()
+            ],
+            "operator_requests": [
+                type(
+                    "OpenRequest",
+                    (),
+                    {"epic_issue_number": 42, "reason_code": "progress_timeout"},
+                )()
+            ],
+            "intents": [
+                type(
+                    "OpenIntent",
+                    (),
+                    {
+                        "id": "intent-1",
+                        "status": "awaiting_clarification",
+                        "summary": "Need scope",
+                    },
+                )()
+            ],
+            "recommended_actions": [
+                '/tp-handle --session orch-1 --intent intent-1 --answer "..."'
+            ],
+        },
+    )
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "orch-1" in output
+    assert "story_worker" in output
+    assert "progress_timeout" in output
+    assert "intent-1" in output
+    assert "task-1" in output
+    assert "current phase: verify" in output
+    assert "canonical loop: observe -> plan -> act -> verify -> decide_next" in output
+    assert "objective: Advance repo owner/repo through orchestrator session" in output
+    assert "/tp-handle --session orch-1 --intent intent-1 --answer" in output
+
+
+def test_workflow_handle_uses_orchestrator_service(capsys):
+    from taskplane.workflow_cli import main
+    from taskplane.settings import TaskplaneConfig
+
+    exit_code = main(
+        [
+            "handle",
+            "--session",
+            "orch-1",
+            "--repo",
+            "owner/repo",
+            "--request",
+            "epic:42:progress_timeout",
+            "--approve",
+        ],
+        config_loader=lambda: TaskplaneConfig(
+            postgres_dsn="postgresql://user:pass@localhost:5432/taskplane"
+        ),
+        repository_builder=lambda **kwargs: object(),
+        orchestrator_handle=lambda **kwargs: {
+            "action": "ack_operator_request",
+            "closed_request": type(
+                "ClosedRequest",
+                (),
+                {
+                    "epic_issue_number": 42,
+                    "reason_code": "progress_timeout",
+                    "closed_reason": "approved",
+                },
+            )(),
+        },
+    )
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "ack_operator_request" in output
+    assert "progress_timeout" in output
+
+
+def test_workflow_handle_can_answer_intent(capsys):
+    from taskplane.workflow_cli import main
+    from taskplane.settings import TaskplaneConfig
+
+    exit_code = main(
+        [
+            "handle",
+            "--session",
+            "orch-1",
+            "--intent",
+            "intent-1",
+            "--answer",
+            "Use JWT",
+        ],
+        config_loader=lambda: TaskplaneConfig(
+            postgres_dsn="postgresql://user:pass@localhost:5432/taskplane"
+        ),
+        repository_builder=lambda **kwargs: object(),
+        orchestrator_handle=lambda **kwargs: {
+            "action": "answer_intent",
+            "intent": type(
+                "Intent", (), {"id": "intent-1", "status": "awaiting_review"}
+            )(),
+        },
+    )
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "answer_intent" in output
+    assert "intent-1" in output
