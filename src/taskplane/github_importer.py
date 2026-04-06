@@ -11,6 +11,9 @@ from .models import (
 
 ISSUE_REF_RE = re.compile(r"(?<![A-Za-z])#(\d+)")
 SECTION_HEADING_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
+INLINE_PARENT_REFERENCE_RE = re.compile(
+    r"(?i)(?:story|epic)\s+#(\d+)\s*\((?:父\s*(?:story|epic)|parent\s*(?:story|epic))\)"
+)
 
 
 def normalize_github_issue(repo: str, raw_issue: dict) -> GitHubNormalizedIssue:
@@ -111,6 +114,8 @@ def _extract_parent_issue_numbers(body: str) -> list[int]:
         }:
             parent_numbers.extend(int(match) for match in ISSUE_REF_RE.findall(content))
 
+    parent_numbers.extend(_extract_inline_parent_issue_numbers(body))
+
     return _deduplicate_preserve_order(parent_numbers)
 
 
@@ -119,6 +124,10 @@ def _extract_part_of_issue_numbers(body: str) -> list[int]:
         int(match)
         for match in re.findall(r"Part of\s+#(\d+)", body, flags=re.IGNORECASE)
     ]
+
+
+def _extract_inline_parent_issue_numbers(body: str) -> list[int]:
+    return [int(match) for match in INLINE_PARENT_REFERENCE_RE.findall(body)]
 
 
 def _extract_dependency_issue_numbers(body: str, *, headings: set[str]) -> list[int]:

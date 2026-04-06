@@ -175,7 +175,7 @@ def test_sync_program_governance_to_control_plane_writes_epics_and_stories():
     assert connection.commits > 0
 
 
-def test_sync_program_governance_to_control_plane_preserves_existing_execution_status():
+def test_sync_program_governance_to_control_plane_preserves_active_execution_status_but_reopens_stale_done():
     projection = build_program_governance_projection(
         repo="codefromkarl/stardrifter",
         issues=[
@@ -231,17 +231,64 @@ def test_sync_program_governance_to_control_plane_preserves_existing_execution_s
     story_insert_params = [
         params
         for sql, params in zip(connection.executed_sql, connection.executed_params, strict=False)
-        if "INSERT INTO program_story" in sql
+        if "INSERT INTO program_story (" in sql
     ]
     epic_insert_params = [
         params
         for sql, params in zip(connection.executed_sql, connection.executed_params, strict=False)
-        if "INSERT INTO program_epic" in sql
+        if "INSERT INTO program_epic (" in sql
     ]
 
     assert any(params[5] == "active" for params in epic_insert_params)
-    assert any(params[7] == "done" for params in story_insert_params)
     assert any(params[7] == "active" for params in story_insert_params)
+    assert any(params[7] == "gated" for params in story_insert_params)
+
+
+def test_sync_program_governance_to_control_plane_reopens_stale_done_story_status():
+    projection = build_program_governance_projection(
+        repo="codefromkarl/stardrifter",
+        issues=[
+            _issue(14, "[Epic][Lane 02] Fleet Simulation 迁移", ["epic", "lane:02", "status:pending"]),
+            _issue(25, "[Story][02-B] Route execution", ["story", "lane:02", "status:pending"], body="Part of #14."),
+            _issue(90, "[02-IMPL] 实现 fleet route commitment 与 ETA 基础执行链", ["task", "lane:02", "status:pending"]),
+        ],
+    )
+    connection = FakeConnection(
+        fetchall_results=[
+            [
+                {
+                    "issue_number": 14,
+                    "program_status": "approved",
+                    "execution_status": "gated",
+                    "active_wave": None,
+                    "notes": None,
+                },
+            ],
+            [
+                {
+                    "issue_number": 25,
+                    "program_status": "approved",
+                    "execution_status": "done",
+                    "active_wave": None,
+                    "notes": None,
+                },
+            ],
+        ]
+    )
+
+    sync_program_governance_to_control_plane(
+        connection=connection,
+        repo="codefromkarl/stardrifter",
+        projection=projection,
+    )
+
+    story_insert_params = [
+        params
+        for sql, params in zip(connection.executed_sql, connection.executed_params, strict=False)
+        if "INSERT INTO program_story (" in sql
+    ]
+
+    assert any(params[7] == "gated" for params in story_insert_params)
 
 
 class FakeCursor:

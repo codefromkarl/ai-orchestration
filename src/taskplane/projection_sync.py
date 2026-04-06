@@ -12,6 +12,27 @@ from .models import (
     GitHubTaskProjection,
 )
 
+WAVE0_FROZEN_TARGET_PATHS: tuple[str, ...] = (
+    "docs/baselines/wave0-freeze.md",
+    "data/campaign/authored/campaign_map.json",
+    "data/campaign/authored/campaign_systems.json",
+    "data/campaign/authored/campaign_markets.json",
+    "data/campaign/authored/campaign_hazards.json",
+    "data/campaign/authored/campaign_transit_nodes.json",
+    "data/campaign/authored/campaign_abilities.json",
+    "data/campaign/authored/campaign_overrides.json",
+    "data/campaign/authored/campaign_faction_economy.json",
+    "data/campaign/authored/campaign_commodities.json",
+    "data/campaign/authored/campaign_industries.json",
+    "data/campaign/authored/campaign_submarkets.json",
+    "godot/bridge/command_bridge.gd",
+    "src/stardrifter_engine/services/world_query_service.py",
+    "src/stardrifter_engine/campaign/authored_repository.py",
+)
+FROZEN_TARGET_PREFIXES: tuple[str, ...] = (
+    "docs/authority/",
+)
+
 
 def load_projection_from_staging(
     *,
@@ -63,6 +84,17 @@ def sync_projection_to_control_plane(
             DELETE FROM story_dependency
             WHERE story_issue_number IN (
                 SELECT DISTINCT jsonb_array_elements_text(dod_json->'story_issue_numbers')::int
+                FROM work_item
+                WHERE repo = %s
+            )
+            """,
+            (repo,),
+        )
+        cursor.execute(
+            """
+            DELETE FROM work_target
+            WHERE work_id IN (
+                SELECT id
                 FROM work_item
                 WHERE repo = %s
             )
@@ -146,6 +178,29 @@ def sync_projection_to_control_plane(
                     ),
                 ),
             )
+            for target_path in _deduplicate_paths(work_item.planned_paths):
+                is_frozen = _is_frozen_target(target_path)
+                cursor.execute(
+                    """
+                    INSERT INTO work_target (
+                        work_id,
+                        target_path,
+                        target_type,
+                        owner_lane,
+                        is_frozen,
+                        requires_human_approval
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        work_item.id,
+                        target_path,
+                        _infer_target_type(target_path),
+                        work_item.lane,
+                        is_frozen,
+                        is_frozen,
+                    ),
+                )
 
         for dependency in projection.work_dependencies:
             cursor.execute(
@@ -171,6 +226,35 @@ def sync_projection_to_control_plane(
             )
 
     connection.commit()
+
+
+def _deduplicate_paths(paths: tuple[str, ...]) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for path in paths:
+        normalized = path.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered.append(normalized)
+    return ordered
+
+
+def _infer_target_type(path: str) -> str:
+    normalized = path.rstrip("/")
+    if normalized.startswith("tests/") or normalized.endswith("_test.py"):
+        return "test"
+    if normalized.startswith("docs/") or normalized.endswith(".md"):
+        return "doc"
+    if "." not in normalized.rsplit("/", 1)[-1]:
+        return "dir"
+    return "file"
+
+
+def _is_frozen_target(path: str) -> bool:
+    return path in WAVE0_FROZEN_TARGET_PATHS or path.startswith(
+        FROZEN_TARGET_PREFIXES
+    )
 
 
 def _load_normalized_issues(

@@ -188,6 +188,34 @@ def test_build_reconciliation_report_detects_missing_story_branch_and_worktree()
     ]
 
 
+def test_build_reconciliation_report_detects_stale_done_story_execution_status():
+    report = build_reconciliation_report(
+        task_rows=[],
+        epic_rows=[],
+        story_rows=[
+            {
+                "issue_number": 25,
+                "db_story_complete": False,
+                "execution_status": "done",
+                "story_task_count": 3,
+                "canonical_branch_exists": True,
+                "canonical_worktree_exists": True,
+                "github_state": "OPEN",
+                "status_label": "status:pending",
+            }
+        ],
+    )
+
+    assert report["story_drift"] == [
+        {
+            "issue_number": 25,
+            "kind": "story_execution_state_stale",
+            "execution_status": "done",
+            "story_task_count": 3,
+        }
+    ]
+
+
 def test_build_reconciliation_report_detects_epic_done_vs_github_status_drift():
     report = build_reconciliation_report(
         task_rows=[],

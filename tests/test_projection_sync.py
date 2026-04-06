@@ -219,6 +219,94 @@ def test_sync_projection_to_control_plane_persists_execution_metadata_columns():
     assert insert_params[10] == "soft"
 
 
+def test_sync_projection_to_control_plane_writes_work_targets_for_planned_paths():
+    projection = GitHubTaskProjection(
+        work_items=[
+            WorkItem(
+                id="issue-74",
+                title="[Wave0-IMPL] register freeze targets",
+                lane="Lane INT",
+                wave="Wave0",
+                status="pending",
+                complexity="medium",
+                source_issue_number=74,
+                canonical_story_issue_number=-1901,
+                planned_paths=(
+                    "docs/baselines/wave0-freeze.md",
+                    "src/taskplane/projection_sync.py",
+                ),
+            ),
+        ],
+        story_task_ids={-1901: ["issue-74"]},
+    )
+    connection = FakeConnection()
+
+    sync_projection_to_control_plane(
+        connection=connection,
+        repo="codefromkarl/stardrifter",
+        projection=projection,
+    )
+
+    target_inserts = [
+        params
+        for sql, params in zip(
+            connection.executed_sql, connection.executed_params, strict=False
+        )
+        if "INSERT INTO work_target" in sql
+    ]
+
+    assert len(target_inserts) == 2
+    assert target_inserts[0][0] == "issue-74"
+    assert target_inserts[0][1] == "docs/baselines/wave0-freeze.md"
+    assert target_inserts[1][1] == "src/taskplane/projection_sync.py"
+
+
+def test_sync_projection_to_control_plane_marks_wave0_frozen_targets():
+    projection = GitHubTaskProjection(
+        work_items=[
+            WorkItem(
+                id="issue-90",
+                title="[02-IMPL] touches frozen coordinate surface",
+                lane="Lane 02",
+                wave="Wave0",
+                status="pending",
+                complexity="medium",
+                source_issue_number=90,
+                canonical_story_issue_number=25,
+                planned_paths=(
+                    "docs/authority/active-baselines.md",
+                    "data/campaign/authored/campaign_map.json",
+                    "src/stardrifter_engine/services/world_query_service.py",
+                ),
+            ),
+        ],
+        story_task_ids={25: ["issue-90"]},
+    )
+    connection = FakeConnection()
+
+    sync_projection_to_control_plane(
+        connection=connection,
+        repo="codefromkarl/stardrifter",
+        projection=projection,
+    )
+
+    target_inserts = [
+        cast(tuple[object, ...], params)
+        for sql, params in zip(
+            connection.executed_sql, connection.executed_params, strict=False
+        )
+        if "INSERT INTO work_target" in sql
+    ]
+
+    assert [
+        (params[1], params[4], params[5]) for params in target_inserts
+    ] == [
+        ("docs/authority/active-baselines.md", True, True),
+        ("data/campaign/authored/campaign_map.json", True, True),
+        ("src/stardrifter_engine/services/world_query_service.py", True, True),
+    ]
+
+
 class FakeCursor:
     def __init__(self, connection: "FakeConnection") -> None:
         self.connection = connection

@@ -52,3 +52,45 @@ def test_build_triage_report_reports_unprojected_tasks_and_empty_story():
     assert report.unprojected_task_issue_numbers == [60]
     assert report.storys_without_projected_tasks == [29]
     assert report.anomalies_by_issue[60] == ["missing-lane"]
+
+
+def test_build_triage_report_ignores_closed_stories_without_projected_tasks():
+    issues = [
+        normalize_github_issue(
+            "codefromkarl/stardrifter",
+            {
+                "number": 28,
+                "title": "[Story][03-B] Accessibility / pressure",
+                "body": "Part of #15.",
+                "state": "CLOSED",
+                "url": "https://github.com/codefromkarl/stardrifter/issues/28",
+                "labels": [{"name": "story"}, {"name": "lane:03"}, {"name": "status:done"}],
+            },
+        ),
+        normalize_github_issue(
+            "codefromkarl/stardrifter",
+            {
+                "number": 29,
+                "title": "[Story][03-C] Faction economy profile",
+                "body": "Part of #15.",
+                "state": "OPEN",
+                "url": "https://github.com/codefromkarl/stardrifter/issues/29",
+                "labels": [{"name": "story"}, {"name": "lane:03"}],
+            },
+        ),
+    ]
+    audit = build_completion_audit(issues, [])
+    projection = project_github_tasks_to_work_items(
+        issues=issues,
+        relations=[],
+        completion_audit=audit,
+    )
+
+    report = build_triage_report(
+        issues=issues,
+        relations=[],
+        completion_audit=audit,
+        projection=projection,
+    )
+
+    assert report.storys_without_projected_tasks == [29]

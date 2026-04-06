@@ -105,6 +105,38 @@ def test_project_github_tasks_to_work_items_marks_missing_parent_tasks_for_triag
     assert projection.needs_triage_issue_numbers == [60]
 
 
+def test_project_github_tasks_to_work_items_maps_wave0_impl_task_to_internal_governance_story():
+    issues = [
+        normalize_github_issue(
+            "codefromkarl/stardrifter",
+            {
+                "number": 74,
+                "title": "[Wave0-IMPL] 将 freeze boundary 注册为 control-plane frozen targets",
+                "body": "## 背景\n\nWave 0 governance task.\n",
+                "state": "OPEN",
+                "url": "https://github.com/codefromkarl/stardrifter/issues/74",
+                "labels": [
+                    {"name": "task"},
+                    {"name": "complexity:medium"},
+                    {"name": "status:pending"},
+                ],
+            },
+        )
+    ]
+    completion_audit = build_completion_audit(issues, [])
+
+    projection = project_github_tasks_to_work_items(
+        issues=issues,
+        relations=[],
+        completion_audit=completion_audit,
+    )
+
+    assert [item.id for item in projection.work_items] == ["issue-74"]
+    assert projection.work_items[0].task_type == "governance"
+    assert projection.work_items[0].canonical_story_issue_number == -1901
+    assert projection.needs_triage_issue_numbers == []
+
+
 def test_project_github_tasks_to_work_items_builds_explicit_dependencies():
     issues = [
         normalize_github_issue(

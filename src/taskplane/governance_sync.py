@@ -345,8 +345,16 @@ def _preserve_existing_governance_state(
             "active_wave": active_wave,
             "notes": notes,
         }
+    existing_execution_status = str(
+        existing_row.get("execution_status") or execution_status
+    )
+    preserved_execution_status = existing_execution_status
+    # Re-open stale governance rows when the newly projected state is no longer done.
+    if existing_execution_status == "done" and execution_status != "done":
+        preserved_execution_status = execution_status
+
     return {
-        "execution_status": str(existing_row.get("execution_status") or execution_status),
+        "execution_status": preserved_execution_status,
         "active_wave": existing_row.get("active_wave") or active_wave,
         "notes": existing_row.get("notes") or notes,
     }

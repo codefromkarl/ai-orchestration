@@ -130,6 +130,30 @@ def test_normalize_github_issue_deduplicates_parent_numbers_from_parent_sections
     assert normalized.explicit_parent_issue_numbers == [30, 31, 32]
 
 
+def test_normalize_github_issue_extracts_parent_from_dependency_line_with_parent_marker():
+    raw_issue = {
+        "number": 93,
+        "title": "[05-F-IMPL] Ship Lifecycle Manager 核心实现",
+        "body": (
+            "## 依赖\n\n"
+            "- Story #67 (父 Story)\n"
+            "- Lane 07 Data Foundation (hull_id -> ship_data)\n"
+        ),
+        "state": "OPEN",
+        "url": "https://github.com/codefromkarl/stardrifter/issues/93",
+        "labels": [
+            {"name": "task"},
+            {"name": "lane:05"},
+            {"name": "status:pending"},
+        ],
+    }
+
+    normalized = normalize_github_issue("codefromkarl/stardrifter", raw_issue)
+
+    assert normalized.explicit_parent_issue_numbers == [67]
+    assert "missing-parent-reference" not in normalized.anomaly_codes
+
+
 def test_build_completion_audit_marks_story_complete_only_when_all_children_done():
     issues = [
         normalize_github_issue(

@@ -13,7 +13,9 @@ def build_triage_report(
     issue_by_number = {issue.issue_number: issue for issue in issues}
 
     story_numbers = [
-        issue.issue_number for issue in issues if issue.issue_kind == "story"
+        issue.issue_number
+        for issue in issues
+        if issue.issue_kind == "story" and issue.github_state == "OPEN"
     ]
     projected_story_numbers = set(projection.story_task_ids)
     storys_without_projected_tasks = sorted(

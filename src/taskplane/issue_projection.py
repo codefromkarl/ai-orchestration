@@ -72,7 +72,7 @@ def project_github_tasks_to_work_items(
         related_story_issue_numbers = tuple(story_issue_numbers[1:]) if story_issue_numbers else ()
         if is_governance:
             if canonical_story_issue_number is None:
-                canonical_story_issue_number = INTERNAL_GOVERNANCE_STORY_BY_TASK.get(issue.issue_number)
+                canonical_story_issue_number = _infer_internal_governance_story_issue_number(issue)
                 related_story_issue_numbers = ()
         blocking_mode = "soft" if task_type in {"documentation", "cross_cutting"} else "hard"
 
@@ -231,7 +231,7 @@ def build_projectable_story_task_counts(
         canonical_story_issue_number = story_issue_numbers[0] if story_issue_numbers else None
         if is_governance:
             if canonical_story_issue_number is None:
-                canonical_story_issue_number = INTERNAL_GOVERNANCE_STORY_BY_TASK.get(issue.issue_number)
+                canonical_story_issue_number = _infer_internal_governance_story_issue_number(issue)
         if canonical_story_issue_number is None:
             continue
         counts[canonical_story_issue_number] = counts.get(canonical_story_issue_number, 0) + 1
@@ -276,17 +276,30 @@ def _infer_task_type(
     story_issue_numbers: list[int],
 ) -> str:
     normalized_title = issue.title.upper()
+    if normalized_title.startswith("[WAVE"):
+        if "-TASK]" in normalized_title or "-PROC]" in normalized_title:
+            return "governance"
+        if not story_issue_numbers:
+            return "governance"
+    if "-PROC]" in normalized_title or "[PROCESS]" in normalized_title:
+        return "governance"
     if "-IMPL]" in normalized_title:
         return "core_path"
     if "-DOC]" in normalized_title:
         return "documentation"
-    if "-PROC]" in normalized_title or "[PROCESS]" in normalized_title:
-        return "governance"
-    if normalized_title.startswith("[WAVE"):
-        return "governance"
     if len(story_issue_numbers) > 1:
         return "cross_cutting"
     return "core_path"
+
+
+def _infer_internal_governance_story_issue_number(
+    issue: GitHubNormalizedIssue,
+) -> int | None:
+    if issue.issue_number in INTERNAL_GOVERNANCE_STORY_BY_TASK:
+        return INTERNAL_GOVERNANCE_STORY_BY_TASK[issue.issue_number]
+    if issue.title.upper().startswith("[WAVE0-"):
+        return -1901
+    return None
 
 
 def _infer_planned_paths(*, issue: GitHubNormalizedIssue) -> tuple[str, ...]:

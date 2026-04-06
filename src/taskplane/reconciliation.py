@@ -113,6 +113,16 @@ def build_reconciliation_report(
                 }
             )
 
+        if execution_status == "done" and not db_story_complete:
+            story_drift.append(
+                {
+                    "issue_number": issue_number,
+                    "kind": "story_execution_state_stale",
+                    "execution_status": execution_status,
+                    "story_task_count": story_task_count,
+                }
+            )
+
         if execution_status == "active" and story_task_count > 0:
             if branch_exists is False:
                 story_drift.append(
@@ -176,13 +186,21 @@ def load_reconciliation_rows(
                 e.issue_number,
                 e.execution_status,
                 (
-                    e.execution_status = 'done'
-                    OR NOT EXISTS (
+                    NOT EXISTS (
                         SELECT 1
                         FROM program_story s
                         WHERE s.repo = e.repo
                           AND s.epic_issue_number = e.issue_number
-                          AND s.execution_status <> 'done'
+                          AND (
+                              s.execution_status <> 'done'
+                              OR EXISTS (
+                                  SELECT 1
+                                  FROM work_item wi
+                                  WHERE wi.repo = s.repo
+                                    AND wi.canonical_story_issue_number = s.issue_number
+                                    AND wi.status <> 'done'
+                              )
+                          )
                     )
                 ) AS db_epic_complete,
                 gin.github_state,
@@ -204,7 +222,7 @@ def load_reconciliation_rows(
                 s.execution_status,
                 (
                     s.execution_status = 'done'
-                    OR NOT EXISTS (
+                    AND NOT EXISTS (
                         SELECT 1
                         FROM work_item wi
                         WHERE wi.repo = s.repo
