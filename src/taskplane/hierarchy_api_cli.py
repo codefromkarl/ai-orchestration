@@ -4,16 +4,19 @@ import argparse
 from collections.abc import Sequence
 import os
 
+from .settings import load_taskplane_config
+
 
 def main(argv: Sequence[str] | None = None) -> int:
+    config = load_taskplane_config()
     parser = argparse.ArgumentParser(
         prog="taskplane-ui",
         description="Start the Issue Hierarchy web UI server.",
     )
     parser.add_argument(
         "--dsn",
-        default=os.getenv("TASKPLANE_DSN", ""),
-        help="PostgreSQL DSN (default: $TASKPLANE_DSN)",
+        default=os.getenv("TASKPLANE_DSN", "") or config.postgres_dsn,
+        help="PostgreSQL DSN (default: $TASKPLANE_DSN or taskplane.toml)",
     )
     parser.add_argument(
         "--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1)"
@@ -27,7 +30,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     if not args.dsn:
-        raise SystemExit("TASKPLANE_DSN is required (or pass --dsn)")
+        raise SystemExit(
+            "TASKPLANE_DSN is required (or set [postgres].dsn in taskplane.toml)"
+        )
 
     os.environ["TASKPLANE_DSN"] = args.dsn
 

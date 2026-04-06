@@ -1,0 +1,21 @@
+[postgres]
+dsn = "postgresql://stardrifter:stardrifter@localhost:5432/taskplane"
+
+[console.repo_workdirs]
+"owner/repo" = "/abs/path/to/project"
+
+[console.repo_log_dirs]
+"owner/repo" = "/abs/path/to/logs"
+
+[supervisor.repo_story_executor_commands]
+"owner/repo" = "python3 -m taskplane.codex_task_executor"
+
+[supervisor.repo_story_verifier_commands]
+"owner/repo" = "python3 -m taskplane.task_verifier"
+
+[supervisor.repo_story_force_shell_executor]
+"owner/repo" = false
+
+[dev]
+compose_file = "ops/docker-compose.nocodb.yml"
+env_file = ".env"

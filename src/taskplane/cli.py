@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable, Sequence
+import os
 from pathlib import Path
 import shutil
 
@@ -28,6 +29,7 @@ def main(
 ) -> int:
     args = _build_parser().parse_args(list(argv) if argv is not None else None)
     settings = load_postgres_settings_from_env()
+    os.environ["TASKPLANE_DSN"] = settings.dsn
     frozen_prefixes = tuple(args.frozen_prefix) or ("docs/authority/",)
     workdir = Path(args.workdir).resolve()
     verifier_command = args.verifier_command or DEFAULT_VERIFIER_COMMAND

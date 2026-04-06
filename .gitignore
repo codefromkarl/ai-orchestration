@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.nocodb.example
+taskplane.toml
 
 # Python
 .venv/
