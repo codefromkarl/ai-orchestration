@@ -197,3 +197,102 @@ def test_story_runner_cli_builds_routed_task_executor_when_command_is_provided(
         "python3 -m taskplane.opencode_task_executor"
     )
     assert captured["executor_workdir"] == tmp_path
+
+
+def test_hierarchy_api_cli_reads_dsn_from_taskplane_toml(tmp_path, monkeypatch):
+    import os
+    import sys
+    import types
+
+    from taskplane.hierarchy_api_cli import main
+
+    config_path = tmp_path / "taskplane.toml"
+    config_path.write_text(
+        """
+[postgres]
+dsn = "postgresql://user:pass@localhost:5432/taskplane"
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TASKPLANE_DSN", raising=False)
+
+    captured: dict[str, object] = {}
+
+    fake_uvicorn = types.SimpleNamespace(
+        run=lambda app, host, port, reload: captured.update(
+            {
+                "app": app,
+                "host": host,
+                "port": port,
+                "reload": reload,
+                "dsn": os.getenv("TASKPLANE_DSN"),
+            }
+        )
+    )
+    monkeypatch.setitem(sys.modules, "uvicorn", fake_uvicorn)
+
+    exit_code = main(["--host", "127.0.0.1", "--port", "8123"])
+
+    assert exit_code == 0
+    assert captured["app"] == "taskplane.hierarchy_api:app"
+    assert captured["host"] == "127.0.0.1"
+    assert captured["port"] == 8123
+    assert captured["reload"] is False
+    assert captured["dsn"] == "postgresql://user:pass@localhost:5432/taskplane"
+
+
+def test_cli_main_exports_dsn_from_taskplane_toml_to_subprocess_environment(
+    tmp_path, monkeypatch
+):
+    import os
+
+    from taskplane.cli import main
+    from taskplane.models import ExecutionGuardrailContext
+    from taskplane.worker import WorkerCycleResult
+
+    (tmp_path / "taskplane.toml").write_text(
+        """
+[postgres]
+dsn = "postgresql://user:pass@localhost:5432/taskplane"
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TASKPLANE_DSN", raising=False)
+
+    observed: dict[str, object] = {}
+
+    def fake_repository_builder(*, dsn: str):
+        observed["dsn"] = dsn
+        return object()
+
+    def fake_verifier_builder(*, command_template: str, workdir, check_type: str):
+        observed["env_dsn"] = os.getenv("TASKPLANE_DSN")
+        return lambda *args, **kwargs: None
+
+    def fake_cycle_runner(
+        *,
+        repository,
+        context: ExecutionGuardrailContext,
+        worker_name: str,
+        executor,
+        verifier,
+        committer,
+        work_item_ids=None,
+        workspace_manager=None,
+        dsn=None,
+    ):
+        return WorkerCycleResult(claimed_work_id=None)
+
+    exit_code = main(
+        ["--workdir", str(tmp_path), "--verifier-command", "true"],
+        repository_builder=fake_repository_builder,
+        cycle_runner=fake_cycle_runner,
+        verifier_builder=fake_verifier_builder,
+        committer_builder=lambda **kwargs: object(),
+    )
+
+    assert exit_code == 0
+    assert observed["dsn"] == "postgresql://user:pass@localhost:5432/taskplane"
+    assert observed["env_dsn"] == "postgresql://user:pass@localhost:5432/taskplane"
