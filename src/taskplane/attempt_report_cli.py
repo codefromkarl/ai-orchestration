@@ -15,7 +15,7 @@ def main(
     *,
     repository_builder: Callable[..., Any] = build_postgres_repository,
     row_loader: Callable[..., list[dict[str, Any]]] | None = None,
-    report_builder: Callable[..., dict[str, int]] = build_attempt_report,
+    report_builder: Callable[..., dict[str, Any]] = build_attempt_report,
 ) -> int:
     args = _build_parser().parse_args(list(argv) if argv is not None else None)
     settings = load_postgres_settings_from_env()
@@ -27,14 +27,35 @@ def main(
         else _load_execution_runs(connection=connection, repo=args.repo)
     )
     report = report_builder(execution_runs=rows)
+    context = {
+        key: value
+        for key, value in {
+            "suite": args.suite,
+            "scenario": args.scenario,
+        }.items()
+        if value
+    }
     if args.format == "json":
         payload = dict(report)
         payload["repo"] = args.repo
+        if context:
+            payload["context"] = context
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
         return 0
     summary = report.get("summary") or report
+    taxonomy = report.get("taxonomy") or {}
+    context_prefix = " ".join(
+        f"{key}={value}" for key, value in context.items()
+    ).strip()
+    if context_prefix:
+        context_prefix = f"{context_prefix} "
+    taxonomy_suffix = " ".join(
+        f"taxonomy.{key}={value}" for key, value in taxonomy.items()
+    ).strip()
+    if taxonomy_suffix:
+        taxonomy_suffix = f" {taxonomy_suffix}"
     print(
-        f"repo={args.repo} total_runs={summary['total_runs']} "
+        f"{context_prefix}repo={args.repo} total_runs={summary['total_runs']} "
         f"done_runs={summary['done_runs']} "
         f"needs_decision_runs={summary['needs_decision_runs']} "
         f"timeout_runs={summary['timeout_runs']} "
@@ -42,6 +63,7 @@ def main(
         f"first_attempt_success_runs={summary['first_attempt_success_runs']} "
         f"eventual_success_runs={summary['eventual_success_runs']} "
         f"average_attempts_to_success={summary['average_attempts_to_success']}"
+        f"{taxonomy_suffix}"
     )
     return 0
 
@@ -57,6 +79,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--repo", required=True)
     parser.add_argument("--format", choices=("text", "json"), default="text")
+    parser.add_argument("--suite")
+    parser.add_argument("--scenario")
     return parser
 
 

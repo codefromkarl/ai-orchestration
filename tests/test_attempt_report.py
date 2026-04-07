@@ -123,3 +123,42 @@ def test_build_attempt_report_emits_versioned_fact_summary():
     assert report["kind"] == "attempt_report"
     assert report["summary"]["total_runs"] == 1
     assert report["summary"]["done_runs"] == 1
+
+
+def test_build_attempt_report_emits_minimal_failure_taxonomy_rollup():
+    report = build_attempt_report(
+        execution_runs=[
+            {
+                "status": "done",
+                "result_payload_json": {"outcome": "done"},
+            },
+            {
+                "status": "blocked",
+                "result_payload_json": {"outcome": "needs_decision"},
+            },
+            {
+                "status": "blocked",
+                "result_payload_json": {"reason_code": "protocol_error"},
+            },
+            {
+                "status": "blocked",
+                "result_payload_json": {"reason_code": "invalid-result-payload"},
+            },
+            {
+                "status": "blocked",
+                "result_payload_json": {"reason_code": "tooling_error"},
+            },
+            {
+                "status": "blocked",
+                "result_payload_json": {"reason_code": "upstream_api_error"},
+            },
+        ]
+    )
+
+    assert report["taxonomy"] == {
+        "success": 1,
+        "operator_blocked": 1,
+        "protocol_failures": 1,
+        "payload_failures": 1,
+        "infra_failures": 2,
+    }

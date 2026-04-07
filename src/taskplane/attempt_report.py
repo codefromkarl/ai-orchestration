@@ -23,6 +23,13 @@ def build_attempt_report(*, execution_runs: list[dict[str, Any]]) -> dict[str, A
         "total_work_items": 0,
         "average_attempts_to_success": 0.0,
     }
+    taxonomy = {
+        "success": 0,
+        "operator_blocked": 0,
+        "protocol_failures": 0,
+        "payload_failures": 0,
+        "infra_failures": 0,
+    }
     runs_by_work_id: dict[str, list[dict[str, Any]]] = {}
     for run in execution_runs:
         status = str(run.get("status") or "")
@@ -36,26 +43,37 @@ def build_attempt_report(*, execution_runs: list[dict[str, Any]]) -> dict[str, A
 
         if status == "done" or outcome == "done":
             summary["done_runs"] += 1
+            taxonomy["success"] += 1
         if outcome == "needs_decision":
             summary["needs_decision_runs"] += 1
+            taxonomy["operator_blocked"] += 1
         if reason_code == "timeout":
             summary["timeout_runs"] += 1
+            taxonomy["infra_failures"] += 1
         if reason_code == "protocol_error":
             summary["protocol_error_runs"] += 1
+            taxonomy["protocol_failures"] += 1
         if reason_code == "invalid-result-payload":
             summary["invalid_payload_runs"] += 1
+            taxonomy["payload_failures"] += 1
         if reason_code == "missing-terminal-payload":
             summary["missing_terminal_runs"] += 1
+            taxonomy["payload_failures"] += 1
         if reason_code == "multiple-terminal-payloads":
             summary["multiple_terminal_runs"] += 1
+            taxonomy["payload_failures"] += 1
         if reason_code == "non_terminal_result_payload":
             summary["non_terminal_runs"] += 1
+            taxonomy["payload_failures"] += 1
         if reason_code == "interrupted_retryable":
             summary["interrupted_runs"] += 1
+            taxonomy["infra_failures"] += 1
         if reason_code == "tooling_error":
             summary["tooling_error_runs"] += 1
+            taxonomy["infra_failures"] += 1
         if reason_code == "upstream_api_error":
             summary["upstream_api_error_runs"] += 1
+            taxonomy["infra_failures"] += 1
 
     attempts_to_success: list[int] = []
     summary["total_work_items"] = len(runs_by_work_id)
@@ -91,6 +109,7 @@ def build_attempt_report(*, execution_runs: list[dict[str, Any]]) -> dict[str, A
         "schema_version": "v1",
         "kind": "attempt_report",
         "summary": summary,
+        "taxonomy": taxonomy,
     }
     report.update(summary)
     return report
