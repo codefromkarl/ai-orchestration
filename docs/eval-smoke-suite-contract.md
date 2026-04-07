@@ -135,10 +135,104 @@ JSON 输出会附带：
 
 ---
 
-## 7. 当前权威入口
+## 7. 默认 threshold profile
+
+当前与 `smoke-core` 对应的默认 threshold profile 为：
+
+- `smoke-core-default-thresholds`
+
+代码入口：
+
+- `src/taskplane/eval_ci_thresholds.py`
+
+当前默认 thresholds：
+
+- `minimum_success_rate = 0.75`
+- `maximum_protocol_failures = 0`
+- `maximum_average_attempts_to_success = 2.0`
+- `minimum_first_attempt_success_rate = 0.5`
+
+这个 profile 当前只定义**稳定 contract**，不直接代表完整 release policy。
+
+---
+
+## 8. Threshold evaluator
+
+Taskplane 当前提供一个最小 evaluator helper：
+
+- `evaluate_attempt_report_against_thresholds(report, profile)`
+
+它是一个**纯函数**，不会修改任何 runtime state。
+
+当前返回结构至少包含：
+
+- `passed`
+- `violations`
+- `computed`
+
+其中 `computed` 当前至少包含：
+
+- `success_rate`
+- `first_attempt_success_rate`
+- `protocol_failures`
+- `average_attempts_to_success`
+
+这使得下游消费者不需要重复实现最基础的 threshold 判断逻辑。
+
+---
+
+## 9. 与 CLI 的关系
+
+`taskplane-attempt-report` 当前支持：
+
+- `--suite`
+- `--scenario`
+- `--evaluate-thresholds`
+
+示例：
+
+```bash
+taskplane-attempt-report \
+  --repo owner/repo \
+  --format json \
+  --suite smoke-core \
+  --scenario retry-then-success \
+  --evaluate-thresholds
+```
+
+JSON 输出会附带：
+
+```json
+{
+  "context": {
+    "suite": "smoke-core",
+    "scenario": "retry-then-success"
+  },
+  "evaluation": {
+    "passed": true,
+    "violations": [],
+    "computed": {
+      "success_rate": 1.0,
+      "first_attempt_success_rate": 1.0,
+      "protocol_failures": 0,
+      "average_attempts_to_success": 1.0
+    }
+  }
+}
+```
+
+Text 输出会附带最小 gate 结果，例如：
+
+- `thresholds.passed=yes`
+- `thresholds.violations=0`
+
+---
+
+## 10. 当前权威入口
 
 - 文档：`docs/eval-smoke-suite-contract.md`
 - 代码：`src/taskplane/eval_smoke_suites.py`
+- 阈值：`src/taskplane/eval_ci_thresholds.py`
 - 报表导出：`src/taskplane/attempt_report_cli.py`
 
 如果未来 contract 发生变化，应同步更新以上三个入口。
