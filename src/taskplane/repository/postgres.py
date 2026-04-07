@@ -1265,6 +1265,7 @@ class PostgresControlPlaneRepository:
         plan_version: int = 1,
         supersedes_plan_id: str | None = None,
         replan_events_json: list[dict[str, Any]] | None = None,
+        completion_contract_json: dict[str, Any] | None = None,
     ) -> OrchestratorSession:
         session_id = f"orch-{uuid.uuid4().hex[:12]}"
         with self._connection.cursor() as cursor:
@@ -1274,12 +1275,12 @@ class PostgresControlPlaneRepository:
                     id, repo, host_tool, started_by, status, watch_scope_json,
                     current_phase, objective_summary, plan_summary, handoff_summary,
                     next_action_json, milestones_json, plan_version,
-                    supersedes_plan_id, replan_events_json
-                ) VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s::jsonb)
+                    supersedes_plan_id, replan_events_json, completion_contract_json
+                ) VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s::jsonb, %s::jsonb)
                 RETURNING id, repo, host_tool, started_by, status, watch_scope_json,
                           current_phase, objective_summary, plan_summary, handoff_summary,
                           next_action_json, milestones_json, plan_version,
-                          supersedes_plan_id, replan_events_json,
+                          supersedes_plan_id, replan_events_json, completion_contract_json,
                           created_at, updated_at
                 """,
                 (
@@ -1298,6 +1299,7 @@ class PostgresControlPlaneRepository:
                     int(plan_version or 1),
                     supersedes_plan_id,
                     json.dumps(replan_events_json or []),
+                    json.dumps(completion_contract_json or {}),
                 ),
             )
             row = cursor.fetchone()
@@ -1311,7 +1313,7 @@ class PostgresControlPlaneRepository:
                 SELECT id, repo, host_tool, started_by, status, watch_scope_json,
                        current_phase, objective_summary, plan_summary, handoff_summary,
                        next_action_json, milestones_json, plan_version,
-                       supersedes_plan_id, replan_events_json,
+                       supersedes_plan_id, replan_events_json, completion_contract_json,
                        created_at, updated_at
                 FROM orchestrator_session
                 WHERE id = %s
@@ -1336,7 +1338,7 @@ class PostgresControlPlaneRepository:
                 RETURNING id, repo, host_tool, started_by, status, watch_scope_json,
                           current_phase, objective_summary, plan_summary, handoff_summary,
                           next_action_json, milestones_json, plan_version,
-                          supersedes_plan_id, replan_events_json,
+                          supersedes_plan_id, replan_events_json, completion_contract_json,
                           created_at, updated_at
                 """,
                 (json.dumps(watch_scope_json), session_id),
@@ -1358,7 +1360,7 @@ class PostgresControlPlaneRepository:
                 RETURNING id, repo, host_tool, started_by, status, watch_scope_json,
                           current_phase, objective_summary, plan_summary, handoff_summary,
                           next_action_json, milestones_json, plan_version,
-                          supersedes_plan_id, replan_events_json,
+                          supersedes_plan_id, replan_events_json, completion_contract_json,
                           created_at, updated_at
                 """,
                 (status, session_id),
@@ -1608,6 +1610,9 @@ class PostgresControlPlaneRepository:
             supersedes_plan_id=self._value_optional(row, "supersedes_plan_id"),
             replan_events_json=list(
                 self._value_optional(row, "replan_events_json") or []
+            ),
+            completion_contract_json=dict(
+                self._value_optional(row, "completion_contract_json") or {}
             ),
             created_at=self._value_optional(row, "created_at"),
             updated_at=self._value_optional(row, "updated_at"),

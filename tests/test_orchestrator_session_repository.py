@@ -154,3 +154,35 @@ def test_postgres_repository_persists_orchestrator_session_plan_versions_and_rep
     assert loaded.supersedes_plan_id == "plan-v1"
     assert loaded.replan_events_json[0]["trigger_type"] == "verification_failure"
     assert loaded.replan_events_json[0]["new_plan_id"] == "plan-v2"
+
+
+@pytest.mark.usefixtures("postgres_test_db")
+def test_postgres_repository_persists_orchestrator_session_completion_contract(
+    postgres_test_db: str,
+):
+    with psycopg.connect(
+        postgres_test_db, row_factory=cast(Any, dict_row)
+    ) as connection:
+        repository = PostgresControlPlaneRepository(connection)
+
+        session = repository.create_orchestrator_session(
+            repo="owner/repo",
+            host_tool="claude_code",
+            started_by="operator",
+            watch_scope_json={"story_issue_numbers": [123]},
+            completion_contract_json={
+                "required_verification_profiles": ["task_verifier", "pytest"],
+                "required_evidence_classes": ["verification_evidence"],
+                "approval_required": False,
+                "expected_artifacts": ["execution_run", "verification_result"],
+            },
+        )
+
+        loaded = repository.get_orchestrator_session(session.id)
+
+    assert loaded is not None
+    assert loaded.completion_contract_json["approval_required"] is False
+    assert loaded.completion_contract_json["required_verification_profiles"] == [
+        "task_verifier",
+        "pytest",
+    ]

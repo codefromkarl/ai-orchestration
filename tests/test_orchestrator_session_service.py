@@ -75,6 +75,10 @@ def test_start_orchestrator_session_creates_session_and_tracks_launches() -> Non
     assert result.session.plan_version == 1
     assert result.session.supersedes_plan_id is None
     assert result.session.replan_events_json == []
+    assert result.session.completion_contract_json["approval_required"] is False
+    assert result.session.completion_contract_json[
+        "required_verification_profiles"
+    ] == ["task_verifier"]
 
 
 def test_watch_orchestrator_session_returns_jobs_and_escalations() -> None:
@@ -195,6 +199,7 @@ def test_watch_orchestrator_session_returns_phase_and_compact_summary() -> None:
     assert payload["milestones"][0]["milestone_id"] == "blocked-work-review"
     assert payload["plan_version"] == 1
     assert payload["replan_events"] == []
+    assert payload["completion_contract"]["approval_required"] is False
 
 
 def test_watch_orchestrator_session_exposes_replan_history() -> None:
@@ -221,6 +226,30 @@ def test_watch_orchestrator_session_exposes_replan_history() -> None:
     assert payload["plan_version"] == 3
     assert payload["supersedes_plan_id"] == "plan-v2"
     assert payload["replan_events"][0]["trigger_type"] == "verification_failure"
+
+
+def test_watch_orchestrator_session_exposes_completion_contract() -> None:
+    repository = _repository()
+    session = repository.create_orchestrator_session(
+        repo="owner/repo",
+        host_tool="claude_code",
+        started_by="operator",
+        watch_scope_json={"story_issue_numbers": [123]},
+        completion_contract_json={
+            "required_verification_profiles": ["task_verifier", "pytest"],
+            "required_evidence_classes": ["verification_evidence"],
+            "approval_required": True,
+            "expected_artifacts": ["execution_run", "verification_result"],
+        },
+    )
+
+    payload = watch_orchestrator_session(repository=repository, session_id=session.id)
+
+    assert payload["completion_contract"]["approval_required"] is True
+    assert payload["completion_contract"]["expected_artifacts"] == [
+        "execution_run",
+        "verification_result",
+    ]
 
 
 def test_watch_orchestrator_session_filters_blocked_tasks_by_watched_story_scope() -> (

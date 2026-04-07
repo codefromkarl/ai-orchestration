@@ -55,6 +55,12 @@ def start_orchestrator_session(
         plan_version=1,
         supersedes_plan_id=None,
         replan_events_json=[],
+        completion_contract_json={
+            "required_verification_profiles": ["task_verifier"],
+            "required_evidence_classes": ["verification_evidence"],
+            "approval_required": False,
+            "expected_artifacts": ["execution_run", "verification_result"],
+        },
     )
     launch_payload = launch_fn(
         repo=repo,
@@ -161,6 +167,11 @@ def watch_orchestrator_session(*, repository: Any, session_id: str) -> dict[str,
         "plan_version": int(getattr(session, "plan_version", 1) or 1),
         "supersedes_plan_id": getattr(session, "supersedes_plan_id", None),
         "replan_events": list(getattr(session, "replan_events_json", []) or []),
+        "completion_contract": _build_completion_contract(
+            persisted_completion_contract=dict(
+                getattr(session, "completion_contract_json", {}) or {}
+            )
+        ),
         "operator_requests": repository.list_operator_requests(repo=session.repo),
         "intents": intents,
         "blocked_tasks": blocked_tasks,
@@ -294,6 +305,19 @@ def _build_milestones(
             "ordering": 1,
         }
     ]
+
+
+def _build_completion_contract(
+    *, persisted_completion_contract: dict[str, Any]
+) -> dict[str, Any]:
+    if persisted_completion_contract:
+        return dict(persisted_completion_contract)
+    return {
+        "required_verification_profiles": ["task_verifier"],
+        "required_evidence_classes": ["verification_evidence"],
+        "approval_required": False,
+        "expected_artifacts": ["execution_run", "verification_result"],
+    }
 
 
 def handle_orchestrator_session_action(

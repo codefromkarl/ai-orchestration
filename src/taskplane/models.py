@@ -286,6 +286,7 @@ class OrchestratorSession:
     plan_version: int = 1
     supersedes_plan_id: str | None = None
     replan_events_json: list[dict[str, Any]] = field(default_factory=list)
+    completion_contract_json: dict[str, Any] = field(default_factory=dict)
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

@@ -761,6 +761,7 @@ class InMemoryControlPlaneRepository:
         plan_version: int = 1,
         supersedes_plan_id: str | None = None,
         replan_events_json: list[dict[str, Any]] | None = None,
+        completion_contract_json: dict[str, Any] | None = None,
     ) -> OrchestratorSession:
         session = OrchestratorSession(
             id=f"orch-{secrets.token_hex(6)}",
@@ -777,6 +778,7 @@ class InMemoryControlPlaneRepository:
             plan_version=int(plan_version or 1),
             supersedes_plan_id=supersedes_plan_id,
             replan_events_json=[dict(item) for item in (replan_events_json or [])],
+            completion_contract_json=dict(completion_contract_json or {}),
         )
         self.orchestrator_sessions[session.id] = session
         self.orchestrator_session_jobs.setdefault(session.id, [])
