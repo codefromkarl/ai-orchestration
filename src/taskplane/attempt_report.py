@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 
-def build_attempt_report(*, execution_runs: list[dict[str, Any]]) -> dict[str, int]:
-    report = {
+def build_attempt_report(*, execution_runs: list[dict[str, Any]]) -> dict[str, Any]:
+    summary = {
         "total_runs": len(execution_runs),
         "done_runs": 0,
         "needs_decision_runs": 0,
@@ -35,30 +35,30 @@ def build_attempt_report(*, execution_runs: list[dict[str, Any]]) -> dict[str, i
             runs_by_work_id.setdefault(work_id, []).append(run)
 
         if status == "done" or outcome == "done":
-            report["done_runs"] += 1
+            summary["done_runs"] += 1
         if outcome == "needs_decision":
-            report["needs_decision_runs"] += 1
+            summary["needs_decision_runs"] += 1
         if reason_code == "timeout":
-            report["timeout_runs"] += 1
+            summary["timeout_runs"] += 1
         if reason_code == "protocol_error":
-            report["protocol_error_runs"] += 1
+            summary["protocol_error_runs"] += 1
         if reason_code == "invalid-result-payload":
-            report["invalid_payload_runs"] += 1
+            summary["invalid_payload_runs"] += 1
         if reason_code == "missing-terminal-payload":
-            report["missing_terminal_runs"] += 1
+            summary["missing_terminal_runs"] += 1
         if reason_code == "multiple-terminal-payloads":
-            report["multiple_terminal_runs"] += 1
+            summary["multiple_terminal_runs"] += 1
         if reason_code == "non_terminal_result_payload":
-            report["non_terminal_runs"] += 1
+            summary["non_terminal_runs"] += 1
         if reason_code == "interrupted_retryable":
-            report["interrupted_runs"] += 1
+            summary["interrupted_runs"] += 1
         if reason_code == "tooling_error":
-            report["tooling_error_runs"] += 1
+            summary["tooling_error_runs"] += 1
         if reason_code == "upstream_api_error":
-            report["upstream_api_error_runs"] += 1
+            summary["upstream_api_error_runs"] += 1
 
     attempts_to_success: list[int] = []
-    report["total_work_items"] = len(runs_by_work_id)
+    summary["total_work_items"] = len(runs_by_work_id)
     for runs in runs_by_work_id.values():
         first_run = runs[0]
         first_payload = first_run.get("result_payload_json") or {}
@@ -67,7 +67,7 @@ def build_attempt_report(*, execution_runs: list[dict[str, Any]]) -> dict[str, i
             or str(first_payload.get("outcome") or "") == "done"
         )
         if first_done:
-            report["first_attempt_success_runs"] += 1
+            summary["first_attempt_success_runs"] += 1
 
         success_index = None
         for index, run in enumerate(runs, start=1):
@@ -79,12 +79,18 @@ def build_attempt_report(*, execution_runs: list[dict[str, Any]]) -> dict[str, i
                 success_index = index
                 break
         if success_index is not None:
-            report["eventual_success_runs"] += 1
-            report["successful_work_items"] += 1
+            summary["eventual_success_runs"] += 1
+            summary["successful_work_items"] += 1
             attempts_to_success.append(success_index)
 
     if attempts_to_success:
-        report["average_attempts_to_success"] = round(
+        summary["average_attempts_to_success"] = round(
             sum(attempts_to_success) / len(attempts_to_success), 2
         )
+    report = {
+        "schema_version": "v1",
+        "kind": "attempt_report",
+        "summary": summary,
+    }
+    report.update(summary)
     return report

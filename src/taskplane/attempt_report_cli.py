@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable, Sequence
+import json
 from typing import Any
 
 from .attempt_report import build_attempt_report
@@ -26,15 +27,21 @@ def main(
         else _load_execution_runs(connection=connection, repo=args.repo)
     )
     report = report_builder(execution_runs=rows)
+    if args.format == "json":
+        payload = dict(report)
+        payload["repo"] = args.repo
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return 0
+    summary = report.get("summary") or report
     print(
-        f"repo={args.repo} total_runs={report['total_runs']} "
-        f"done_runs={report['done_runs']} "
-        f"needs_decision_runs={report['needs_decision_runs']} "
-        f"timeout_runs={report['timeout_runs']} "
-        f"protocol_error_runs={report['protocol_error_runs']} "
-        f"first_attempt_success_runs={report['first_attempt_success_runs']} "
-        f"eventual_success_runs={report['eventual_success_runs']} "
-        f"average_attempts_to_success={report['average_attempts_to_success']}"
+        f"repo={args.repo} total_runs={summary['total_runs']} "
+        f"done_runs={summary['done_runs']} "
+        f"needs_decision_runs={summary['needs_decision_runs']} "
+        f"timeout_runs={summary['timeout_runs']} "
+        f"protocol_error_runs={summary['protocol_error_runs']} "
+        f"first_attempt_success_runs={summary['first_attempt_success_runs']} "
+        f"eventual_success_runs={summary['eventual_success_runs']} "
+        f"average_attempts_to_success={summary['average_attempts_to_success']}"
     )
     return 0
 
@@ -49,6 +56,7 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Print a compact execution-attempt summary from PostgreSQL.",
     )
     parser.add_argument("--repo", required=True)
+    parser.add_argument("--format", choices=("text", "json"), default="text")
     return parser
 
 

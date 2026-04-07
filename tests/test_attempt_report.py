@@ -51,7 +51,7 @@ def test_build_attempt_report_counts_execution_outcomes():
         ]
     )
 
-    assert report == {
+    expected_summary = {
         "total_runs": 11,
         "done_runs": 1,
         "needs_decision_runs": 1,
@@ -70,6 +70,9 @@ def test_build_attempt_report_counts_execution_outcomes():
         "total_work_items": 0,
         "average_attempts_to_success": 0.0,
     }
+    for key, value in expected_summary.items():
+        assert report[key] == value
+    assert report["summary"] == expected_summary
 
 
 def test_build_attempt_report_computes_success_rate_metrics_by_work_item():
@@ -103,3 +106,20 @@ def test_build_attempt_report_computes_success_rate_metrics_by_work_item():
     assert report["successful_work_items"] == 2
     assert report["total_work_items"] == 3
     assert report["average_attempts_to_success"] == 1.5
+
+
+def test_build_attempt_report_emits_versioned_fact_summary():
+    report = build_attempt_report(
+        execution_runs=[
+            {
+                "work_id": "task-1",
+                "status": "done",
+                "result_payload_json": {"outcome": "done"},
+            }
+        ]
+    )
+
+    assert report["schema_version"] == "v1"
+    assert report["kind"] == "attempt_report"
+    assert report["summary"]["total_runs"] == 1
+    assert report["summary"]["done_runs"] == 1
