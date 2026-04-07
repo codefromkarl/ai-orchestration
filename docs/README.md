@@ -104,6 +104,7 @@ sql/
 
 - `docs/ai-task-testing-strategy.md`
 - `docs/task-orchestrator-correctness-and-verification-design.md`
+- `docs/eval-smoke-suite-contract.md`
 - `docs/reports/e2e-test-report.md`
 
 ### 数据库与迁移

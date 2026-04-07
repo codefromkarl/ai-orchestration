@@ -6,6 +6,8 @@ import json
 from typing import Any
 
 from .attempt_report import build_attempt_report
+from .eval_ci_thresholds import build_default_ci_threshold_profile
+from .eval_ci_thresholds import evaluate_attempt_report_against_thresholds
 from .factory import build_postgres_repository
 from .settings import load_postgres_settings_from_env
 
@@ -27,6 +29,14 @@ def main(
         else _load_execution_runs(connection=connection, repo=args.repo)
     )
     report = report_builder(execution_runs=rows)
+    evaluation = (
+        evaluate_attempt_report_against_thresholds(
+            report=report,
+            profile=build_default_ci_threshold_profile(),
+        )
+        if args.evaluate_thresholds
+        else None
+    )
     context = {
         key: value
         for key, value in {
@@ -40,6 +50,8 @@ def main(
         payload["repo"] = args.repo
         if context:
             payload["context"] = context
+        if evaluation is not None:
+            payload["evaluation"] = evaluation
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
         return 0
     summary = report.get("summary") or report
@@ -54,6 +66,12 @@ def main(
     ).strip()
     if taxonomy_suffix:
         taxonomy_suffix = f" {taxonomy_suffix}"
+    evaluation_suffix = ""
+    if evaluation is not None:
+        evaluation_suffix = (
+            f" thresholds.passed={'yes' if evaluation['passed'] else 'no'}"
+            f" thresholds.violations={len(evaluation['violations'])}"
+        )
     print(
         f"{context_prefix}repo={args.repo} total_runs={summary['total_runs']} "
         f"done_runs={summary['done_runs']} "
@@ -64,6 +82,7 @@ def main(
         f"eventual_success_runs={summary['eventual_success_runs']} "
         f"average_attempts_to_success={summary['average_attempts_to_success']}"
         f"{taxonomy_suffix}"
+        f"{evaluation_suffix}"
     )
     return 0
 
@@ -81,6 +100,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--format", choices=("text", "json"), default="text")
     parser.add_argument("--suite")
     parser.add_argument("--scenario")
+    parser.add_argument("--evaluate-thresholds", action="store_true")
     return parser
 
 

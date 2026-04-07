@@ -203,3 +203,85 @@ def test_attempt_report_cli_text_output_includes_taxonomy(monkeypatch, capsys):
     assert "taxonomy.success=1" in output
     assert "taxonomy.operator_blocked=1" in output
     assert "taxonomy.protocol_failures=1" in output
+
+
+def test_attempt_report_cli_can_emit_threshold_evaluation_json(monkeypatch, capsys):
+    monkeypatch.setenv(
+        "TASKPLANE_DSN",
+        "postgresql://user:pass@localhost:5432/stardrifter",
+    )
+
+    def fake_repository_builder(*, dsn: str):
+        return object()
+
+    def fake_loader(*, connection, repo: str):
+        return [
+            {
+                "work_id": "task-1",
+                "status": "done",
+                "result_payload_json": {"outcome": "done"},
+            },
+            {
+                "work_id": "task-2",
+                "status": "done",
+                "result_payload_json": {"outcome": "done"},
+            },
+        ]
+
+    exit_code = main(
+        [
+            "--repo",
+            "codefromkarl/stardrifter",
+            "--format",
+            "json",
+            "--evaluate-thresholds",
+        ],
+        repository_builder=fake_repository_builder,
+        row_loader=fake_loader,
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["evaluation"]["passed"] is True
+    assert payload["evaluation"]["violations"] == []
+
+
+def test_attempt_report_cli_text_output_includes_threshold_evaluation(
+    monkeypatch, capsys
+):
+    monkeypatch.setenv(
+        "TASKPLANE_DSN",
+        "postgresql://user:pass@localhost:5432/stardrifter",
+    )
+
+    def fake_repository_builder(*, dsn: str):
+        return object()
+
+    def fake_loader(*, connection, repo: str):
+        return [
+            {
+                "work_id": "task-1",
+                "status": "blocked",
+                "result_payload_json": {"reason_code": "protocol_error"},
+            },
+            {
+                "work_id": "task-2",
+                "status": "done",
+                "result_payload_json": {"outcome": "done"},
+            },
+        ]
+
+    exit_code = main(
+        [
+            "--repo",
+            "codefromkarl/stardrifter",
+            "--evaluate-thresholds",
+        ],
+        repository_builder=fake_repository_builder,
+        row_loader=fake_loader,
+    )
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "thresholds.passed=no" in output
+    assert "thresholds.violations=2" in output
