@@ -11,7 +11,7 @@ import re
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 from ..models import (
     ApprovalEvent,
@@ -1260,6 +1260,11 @@ class PostgresControlPlaneRepository:
         objective_summary: str | None = None,
         plan_summary: str | None = None,
         handoff_summary: str | None = None,
+        next_action_json: dict[str, Any] | None = None,
+        milestones_json: list[dict[str, Any]] | None = None,
+        plan_version: int = 1,
+        supersedes_plan_id: str | None = None,
+        replan_events_json: list[dict[str, Any]] | None = None,
     ) -> OrchestratorSession:
         session_id = f"orch-{uuid.uuid4().hex[:12]}"
         with self._connection.cursor() as cursor:
@@ -1267,10 +1272,14 @@ class PostgresControlPlaneRepository:
                 """
                 INSERT INTO orchestrator_session (
                     id, repo, host_tool, started_by, status, watch_scope_json,
-                    current_phase, objective_summary, plan_summary, handoff_summary
-                ) VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s)
+                    current_phase, objective_summary, plan_summary, handoff_summary,
+                    next_action_json, milestones_json, plan_version,
+                    supersedes_plan_id, replan_events_json
+                ) VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s::jsonb)
                 RETURNING id, repo, host_tool, started_by, status, watch_scope_json,
                           current_phase, objective_summary, plan_summary, handoff_summary,
+                          next_action_json, milestones_json, plan_version,
+                          supersedes_plan_id, replan_events_json,
                           created_at, updated_at
                 """,
                 (
@@ -1284,6 +1293,11 @@ class PostgresControlPlaneRepository:
                     objective_summary,
                     plan_summary,
                     handoff_summary,
+                    json.dumps(next_action_json or {}),
+                    json.dumps(milestones_json or []),
+                    int(plan_version or 1),
+                    supersedes_plan_id,
+                    json.dumps(replan_events_json or []),
                 ),
             )
             row = cursor.fetchone()
@@ -1296,6 +1310,8 @@ class PostgresControlPlaneRepository:
                 """
                 SELECT id, repo, host_tool, started_by, status, watch_scope_json,
                        current_phase, objective_summary, plan_summary, handoff_summary,
+                       next_action_json, milestones_json, plan_version,
+                       supersedes_plan_id, replan_events_json,
                        created_at, updated_at
                 FROM orchestrator_session
                 WHERE id = %s
@@ -1319,6 +1335,8 @@ class PostgresControlPlaneRepository:
                 WHERE id = %s
                 RETURNING id, repo, host_tool, started_by, status, watch_scope_json,
                           current_phase, objective_summary, plan_summary, handoff_summary,
+                          next_action_json, milestones_json, plan_version,
+                          supersedes_plan_id, replan_events_json,
                           created_at, updated_at
                 """,
                 (json.dumps(watch_scope_json), session_id),
@@ -1339,6 +1357,8 @@ class PostgresControlPlaneRepository:
                 WHERE id = %s
                 RETURNING id, repo, host_tool, started_by, status, watch_scope_json,
                           current_phase, objective_summary, plan_summary, handoff_summary,
+                          next_action_json, milestones_json, plan_version,
+                          supersedes_plan_id, replan_events_json,
                           created_at, updated_at
                 """,
                 (status, session_id),
@@ -1582,6 +1602,13 @@ class PostgresControlPlaneRepository:
             objective_summary=self._value_optional(row, "objective_summary"),
             plan_summary=self._value_optional(row, "plan_summary"),
             handoff_summary=self._value_optional(row, "handoff_summary"),
+            next_action_json=dict(self._value_optional(row, "next_action_json") or {}),
+            milestones_json=list(self._value_optional(row, "milestones_json") or []),
+            plan_version=int(self._value_optional(row, "plan_version") or 1),
+            supersedes_plan_id=self._value_optional(row, "supersedes_plan_id"),
+            replan_events_json=list(
+                self._value_optional(row, "replan_events_json") or []
+            ),
             created_at=self._value_optional(row, "created_at"),
             updated_at=self._value_optional(row, "updated_at"),
         )

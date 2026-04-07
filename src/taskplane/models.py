@@ -281,6 +281,11 @@ class OrchestratorSession:
     objective_summary: str | None = None
     plan_summary: str | None = None
     handoff_summary: str | None = None
+    next_action_json: dict[str, Any] = field(default_factory=dict)
+    milestones_json: list[dict[str, Any]] = field(default_factory=list)
+    plan_version: int = 1
+    supersedes_plan_id: str | None = None
+    replan_events_json: list[dict[str, Any]] = field(default_factory=list)
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

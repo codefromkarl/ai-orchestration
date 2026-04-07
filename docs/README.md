@@ -95,6 +95,7 @@ sql/
 ### 产品与路线
 
 - `docs/product-roadmap.md`
+- `docs/harness-alignment-roadmap.md`
 - `docs/mvp-design.md`
 - `docs/program-governance-model.md`
 - `docs/natural-language-intake-followup-plan.md`

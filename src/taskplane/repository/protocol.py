@@ -341,6 +341,11 @@ class ControlPlaneRepository(
         objective_summary: str | None = None,
         plan_summary: str | None = None,
         handoff_summary: str | None = None,
+        next_action_json: dict[str, Any] | None = None,
+        milestones_json: list[dict[str, Any]] | None = None,
+        plan_version: int = 1,
+        supersedes_plan_id: str | None = None,
+        replan_events_json: list[dict[str, Any]] | None = None,
     ) -> OrchestratorSession: ...
     def get_orchestrator_session(
         self, session_id: str

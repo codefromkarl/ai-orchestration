@@ -12,7 +12,7 @@ import secrets
 import threading
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 from ..models import (
     ApprovalEvent,
@@ -756,6 +756,11 @@ class InMemoryControlPlaneRepository:
         objective_summary: str | None = None,
         plan_summary: str | None = None,
         handoff_summary: str | None = None,
+        next_action_json: dict[str, Any] | None = None,
+        milestones_json: list[dict[str, Any]] | None = None,
+        plan_version: int = 1,
+        supersedes_plan_id: str | None = None,
+        replan_events_json: list[dict[str, Any]] | None = None,
     ) -> OrchestratorSession:
         session = OrchestratorSession(
             id=f"orch-{secrets.token_hex(6)}",
@@ -763,10 +768,15 @@ class InMemoryControlPlaneRepository:
             host_tool=host_tool,
             started_by=started_by,
             watch_scope_json=watch_scope_json or {},
-            current_phase=current_phase,
+            current_phase=cast(Any, current_phase),
             objective_summary=objective_summary,
             plan_summary=plan_summary,
             handoff_summary=handoff_summary,
+            next_action_json=dict(next_action_json or {}),
+            milestones_json=[dict(item) for item in (milestones_json or [])],
+            plan_version=int(plan_version or 1),
+            supersedes_plan_id=supersedes_plan_id,
+            replan_events_json=[dict(item) for item in (replan_events_json or [])],
         )
         self.orchestrator_sessions[session.id] = session
         self.orchestrator_session_jobs.setdefault(session.id, [])

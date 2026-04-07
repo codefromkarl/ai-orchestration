@@ -9,6 +9,11 @@ CREATE TABLE IF NOT EXISTS orchestrator_session (
     objective_summary TEXT,
     plan_summary TEXT,
     handoff_summary TEXT,
+    next_action_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    milestones_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    plan_version INTEGER NOT NULL DEFAULT 1,
+    supersedes_plan_id TEXT,
+    replan_events_json JSONB NOT NULL DEFAULT '[]'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -24,6 +29,21 @@ ALTER TABLE orchestrator_session
 
 ALTER TABLE orchestrator_session
     ADD COLUMN IF NOT EXISTS handoff_summary TEXT;
+
+ALTER TABLE orchestrator_session
+    ADD COLUMN IF NOT EXISTS next_action_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+ALTER TABLE orchestrator_session
+    ADD COLUMN IF NOT EXISTS milestones_json JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+ALTER TABLE orchestrator_session
+    ADD COLUMN IF NOT EXISTS plan_version INTEGER NOT NULL DEFAULT 1;
+
+ALTER TABLE orchestrator_session
+    ADD COLUMN IF NOT EXISTS supersedes_plan_id TEXT;
+
+ALTER TABLE orchestrator_session
+    ADD COLUMN IF NOT EXISTS replan_events_json JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 ALTER TABLE execution_job
     ADD COLUMN IF NOT EXISTS orchestrator_session_id TEXT NULL;

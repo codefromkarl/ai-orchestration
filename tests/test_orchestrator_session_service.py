@@ -70,6 +70,11 @@ def test_start_orchestrator_session_creates_session_and_tracks_launches() -> Non
         result.session.handoff_summary
         == "Session started; waiting for runtime observations and verification evidence."
     )
+    assert result.session.next_action_json["action_kind"] == "launch_session"
+    assert result.session.milestones_json[0]["milestone_id"] == "session-bootstrap"
+    assert result.session.plan_version == 1
+    assert result.session.supersedes_plan_id is None
+    assert result.session.replan_events_json == []
 
 
 def test_watch_orchestrator_session_returns_jobs_and_escalations() -> None:
@@ -186,6 +191,36 @@ def test_watch_orchestrator_session_returns_phase_and_compact_summary() -> None:
         compact_summary["handoff_summary"]
         == "1 blocked task(s), 0 pending intent(s), 1 running job(s)."
     )
+    assert payload["next_action"]["action_kind"] == "inspect_blockers"
+    assert payload["milestones"][0]["milestone_id"] == "blocked-work-review"
+    assert payload["plan_version"] == 1
+    assert payload["replan_events"] == []
+
+
+def test_watch_orchestrator_session_exposes_replan_history() -> None:
+    repository = _repository()
+    session = repository.create_orchestrator_session(
+        repo="owner/repo",
+        host_tool="claude_code",
+        started_by="operator",
+        watch_scope_json={"story_issue_numbers": [123]},
+        plan_version=3,
+        supersedes_plan_id="plan-v2",
+        replan_events_json=[
+            {
+                "trigger_type": "verification_failure",
+                "reason_summary": "Verifier failed after the first act phase.",
+                "previous_plan_id": "plan-v2",
+                "new_plan_id": "plan-v3",
+            }
+        ],
+    )
+
+    payload = watch_orchestrator_session(repository=repository, session_id=session.id)
+
+    assert payload["plan_version"] == 3
+    assert payload["supersedes_plan_id"] == "plan-v2"
+    assert payload["replan_events"][0]["trigger_type"] == "verification_failure"
 
 
 def test_watch_orchestrator_session_filters_blocked_tasks_by_watched_story_scope() -> (
