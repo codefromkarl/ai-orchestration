@@ -364,6 +364,12 @@ def test_workflow_watch_uses_orchestrator_service(capsys):
                 "plan_summary": "Validate current story execution and pending operator work before deciding the next action.",
                 "handoff_summary": "1 blocked task(s), 1 pending intent(s), 1 running job(s).",
             },
+            "decision_state": {
+                "decision": "verify",
+                "reason": "running jobs need verification before the next transition",
+                "requires_operator": False,
+                "current_phase": "verify",
+            },
             "jobs": [{"id": 11, "status": "running", "job_kind": "story_worker"}],
             "blocked_tasks": [
                 type(
@@ -411,6 +417,12 @@ def test_workflow_watch_uses_orchestrator_service(capsys):
     assert "current phase: verify" in output
     assert "canonical loop: observe -> plan -> act -> verify -> decide_next" in output
     assert "objective: Advance repo owner/repo through orchestrator session" in output
+    assert "decision: verify" in output
+    assert (
+        "decision reason: running jobs need verification before the next transition"
+        in output
+    )
+    assert "requires operator: no" in output
     assert "/tp-handle --session orch-1 --intent intent-1 --answer" in output
 
 

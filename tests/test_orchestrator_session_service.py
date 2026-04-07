@@ -200,6 +200,8 @@ def test_watch_orchestrator_session_returns_phase_and_compact_summary() -> None:
     assert payload["plan_version"] == 1
     assert payload["replan_events"] == []
     assert payload["completion_contract"]["approval_required"] is False
+    assert payload["decision_state"]["decision"] == "escalate"
+    assert payload["decision_state"]["requires_operator"] is True
 
 
 def test_watch_orchestrator_session_exposes_replan_history() -> None:
@@ -226,6 +228,8 @@ def test_watch_orchestrator_session_exposes_replan_history() -> None:
     assert payload["plan_version"] == 3
     assert payload["supersedes_plan_id"] == "plan-v2"
     assert payload["replan_events"][0]["trigger_type"] == "verification_failure"
+    assert payload["decision_state"]["decision"] == "replan"
+    assert payload["decision_state"]["requires_operator"] is False
 
 
 def test_watch_orchestrator_session_exposes_completion_contract() -> None:
@@ -250,6 +254,32 @@ def test_watch_orchestrator_session_exposes_completion_contract() -> None:
         "execution_run",
         "verification_result",
     ]
+
+
+def test_watch_orchestrator_session_decision_state_prefers_verify_for_running_jobs() -> (
+    None
+):
+    repository = _repository()
+    session = repository.create_orchestrator_session(
+        repo="owner/repo",
+        host_tool="claude_code",
+        started_by="operator",
+        watch_scope_json={"story_issue_numbers": [123]},
+    )
+    repository.record_orchestrator_session_job(
+        session_id=session.id,
+        job={
+            "id": 11,
+            "job_kind": "story_worker",
+            "status": "running",
+            "story_issue_number": 123,
+        },
+    )
+
+    payload = watch_orchestrator_session(repository=repository, session_id=session.id)
+
+    assert payload["decision_state"]["decision"] == "verify"
+    assert payload["decision_state"]["requires_operator"] is False
 
 
 def test_watch_orchestrator_session_filters_blocked_tasks_by_watched_story_scope() -> (

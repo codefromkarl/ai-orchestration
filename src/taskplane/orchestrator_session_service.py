@@ -172,6 +172,13 @@ def watch_orchestrator_session(*, repository: Any, session_id: str) -> dict[str,
                 getattr(session, "completion_contract_json", {}) or {}
             )
         ),
+        "decision_state": _build_decision_state(
+            current_phase=current_phase,
+            blocked_tasks=blocked_tasks,
+            intents=intents,
+            jobs=repository.list_orchestrator_session_jobs(session_id),
+            replan_events=list(getattr(session, "replan_events_json", []) or []),
+        ),
         "operator_requests": repository.list_operator_requests(repo=session.repo),
         "intents": intents,
         "blocked_tasks": blocked_tasks,
@@ -317,6 +324,50 @@ def _build_completion_contract(
         "required_evidence_classes": ["verification_evidence"],
         "approval_required": False,
         "expected_artifacts": ["execution_run", "verification_result"],
+    }
+
+
+def _build_decision_state(
+    *,
+    current_phase: str,
+    blocked_tasks: list[Any],
+    intents: list[Any],
+    jobs: list[dict[str, Any]],
+    replan_events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if any(getattr(task, "decision_required", False) for task in blocked_tasks):
+        return {
+            "decision": "escalate",
+            "reason": "blocked work requires operator-visible decision handling",
+            "requires_operator": True,
+            "current_phase": current_phase,
+        }
+    if intents:
+        return {
+            "decision": "plan",
+            "reason": "pending intents must be resolved before continuing",
+            "requires_operator": False,
+            "current_phase": current_phase,
+        }
+    if jobs:
+        return {
+            "decision": "verify",
+            "reason": "running jobs need verification before the next transition",
+            "requires_operator": False,
+            "current_phase": current_phase,
+        }
+    if replan_events:
+        return {
+            "decision": "replan",
+            "reason": "prior replans indicate the next transition should refresh the plan",
+            "requires_operator": False,
+            "current_phase": current_phase,
+        }
+    return {
+        "decision": "continue",
+        "reason": "no blockers or active jobs prevent the loop from continuing",
+        "requires_operator": False,
+        "current_phase": current_phase,
     }
 
 

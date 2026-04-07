@@ -348,6 +348,16 @@ def _run_watch(
             print(f"plan summary: {plan_summary}")
         if handoff_summary:
             print(f"handoff summary: {handoff_summary}")
+    decision_state = payload.get("decision_state") or {}
+    if decision_state:
+        decision = str(decision_state.get("decision") or "").strip()
+        reason = str(decision_state.get("reason") or "").strip()
+        requires_operator = bool(decision_state.get("requires_operator"))
+        if decision:
+            print(f"decision: {decision}")
+        if reason:
+            print(f"decision reason: {reason}")
+        print(f"requires operator: {'yes' if requires_operator else 'no'}")
     print(f"jobs: {len(payload.get('jobs') or [])}")
     for job in payload.get("jobs") or []:
         print(

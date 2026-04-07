@@ -20,6 +20,7 @@ from .job_launcher import (
     build_epic_decomposition_command,
     build_story_command,
     insert_execution_job,
+    launch_managed_process,
 )
 from .repository import PostgresControlPlaneRepository
 from .repository import ReadyStateSyncRepository
@@ -57,6 +58,7 @@ def run_supervisor_iteration(
     story_executor_command: str | None = None,
     story_verifier_command: str | None = None,
     story_force_shell_executor: bool | None = None,
+    orchestrator_session_id: str | None = None,
     ready_state_repository_builder: (
         Callable[[Any], ReadyStateSyncRepository] | None
     ) = None,
@@ -86,6 +88,7 @@ def run_supervisor_iteration(
     from .process_manager import reconcile_finished_jobs
 
     running_processes = running_processes or {}
+    launch_fn = launcher or launch_managed_process
     default_repository_builder = _resolve_default_repository_builder()
     ready_state_repository = (
         ready_state_repository_builder or default_repository_builder
@@ -134,6 +137,18 @@ def run_supervisor_iteration(
 
     repository = (repository_builder or default_repository_builder)(connection)
 
+    session_phase: str | None = None
+    if orchestrator_session_id is not None:
+        get_session = getattr(repository, "get_orchestrator_session", None)
+        if callable(get_session):
+            try:
+                session = get_session(orchestrator_session_id)
+            except Exception:
+                session = None
+            session_phase = str(getattr(session, "current_phase", "") or "")
+            if session_phase in {"escalate", "suspend", "verify"}:
+                return 0
+
     launched = 0
     running_claim_paths = _load_active_claim_paths(connection=connection, repo=repo)
 
@@ -157,7 +172,7 @@ def run_supervisor_iteration(
             project_dir=project_dir,
         )
         log_path = log_dir / f"epic-{epic_issue_number}-decomposition.log"
-        process = launcher(command, log_path)
+        process = launch_fn(command, log_path)
 
         insert_execution_job(
             connection=connection,
@@ -169,6 +184,7 @@ def run_supervisor_iteration(
             pid=process.pid,
             command=command,
             log_path=str(log_path),
+            orchestrator_session_id=orchestrator_session_id,
         )
 
         running_processes[process.pid] = process
@@ -198,7 +214,7 @@ def run_supervisor_iteration(
             project_dir=project_dir,
         )
         log_path = log_dir / f"story-{story_issue_number}-decomposition.log"
-        process = launcher(command, log_path)
+        process = launch_fn(command, log_path)
 
         insert_execution_job(
             connection=connection,
@@ -210,6 +226,7 @@ def run_supervisor_iteration(
             pid=process.pid,
             command=command,
             log_path=str(log_path),
+            orchestrator_session_id=orchestrator_session_id,
         )
 
         running_processes[process.pid] = process
@@ -217,6 +234,9 @@ def run_supervisor_iteration(
         launched += 1
 
     if launched >= remaining_capacity:
+        return launched
+
+    if session_phase == "plan":
         return launched
 
     selected_story_issue_numbers: list[int] = []
@@ -239,7 +259,9 @@ def run_supervisor_iteration(
         selected_story_issue_numbers.append(story_issue_number)
         running_story_issue_numbers.add(story_issue_number)
         if epic_issue_number is not None:
-            epic_issue_by_story_issue_number[story_issue_number] = int(epic_issue_number)
+            epic_issue_by_story_issue_number[story_issue_number] = int(
+                epic_issue_number
+            )
 
     # Select and launch story execution jobs via epic iteration
     epic_selected_story_issue_numbers, epic_issue_map = (
@@ -248,7 +270,9 @@ def run_supervisor_iteration(
             repo=repo,
             repository=repository,
             running_story_issue_numbers=running_story_issue_numbers,
-            available_capacity=remaining_capacity - launched - len(selected_story_issue_numbers),
+            available_capacity=remaining_capacity
+            - launched
+            - len(selected_story_issue_numbers),
             epic_story_batch_size=epic_story_batch_size,
         )
     )
@@ -277,7 +301,9 @@ def run_supervisor_iteration(
             repository=repository,
             story_completion_candidates=story_completion_candidates,
             running_story_issue_numbers=running_story_issue_numbers,
-            available_capacity=remaining_capacity - launched - len(selected_story_issue_numbers),
+            available_capacity=remaining_capacity
+            - launched
+            - len(selected_story_issue_numbers),
             epic_story_batch_size=epic_story_batch_size,
         )
         selected_story_issue_numbers.extend(completion_story_issue_numbers)
@@ -310,7 +336,7 @@ def run_supervisor_iteration(
             force_shell_executor=story_force_shell_executor,
         )
         log_path = log_dir / f"story-{story_issue_number}.log"
-        process = launcher(command, log_path)
+        process = launch_fn(command, log_path)
 
         insert_execution_job(
             connection=connection,
@@ -326,6 +352,7 @@ def run_supervisor_iteration(
             pid=process.pid,
             command=command,
             log_path=str(log_path),
+            orchestrator_session_id=orchestrator_session_id,
         )
 
         running_processes[process.pid] = process
@@ -369,7 +396,7 @@ def run_supervisor_iteration(
             promotion_repo_root=promotion_repo_root,
         )
         log_path = log_dir / f"story-{story_issue_number}.log"
-        process = launcher(command, log_path)
+        process = launch_fn(command, log_path)
 
         insert_execution_job(
             connection=connection,
@@ -381,6 +408,7 @@ def run_supervisor_iteration(
             pid=process.pid,
             command=command,
             log_path=str(log_path),
+            orchestrator_session_id=orchestrator_session_id,
         )
 
         running_processes[process.pid] = process
