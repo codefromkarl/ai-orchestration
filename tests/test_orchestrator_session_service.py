@@ -195,6 +195,23 @@ def test_watch_orchestrator_session_returns_phase_and_compact_summary() -> None:
         compact_summary["handoff_summary"]
         == "1 blocked task(s), 0 pending intent(s), 1 running job(s)."
     )
+    assert (
+        compact_summary["what_changed"]
+        == "Session is waiting on blocked work triage before the loop can continue."
+    )
+    assert (
+        compact_summary["what_remains"]
+        == "Resolve blocked tasks and clear running-job verification state."
+    )
+    assert compact_summary["operator_requirement"] == "operator input required"
+    assert (
+        compact_summary["what_passed"]
+        == "Session context refresh completed for current blocked and running work."
+    )
+    assert (
+        compact_summary["what_failed"]
+        == "Blocked tasks still prevent the loop from continuing automatically."
+    )
     assert payload["next_action"]["action_kind"] == "inspect_blockers"
     assert payload["milestones"][0]["milestone_id"] == "blocked-work-review"
     assert payload["plan_version"] == 1
@@ -279,6 +296,78 @@ def test_watch_orchestrator_session_decision_state_prefers_verify_for_running_jo
     payload = watch_orchestrator_session(repository=repository, session_id=session.id)
 
     assert payload["decision_state"]["decision"] == "verify"
+    assert payload["decision_state"]["requires_operator"] is False
+    compact_summary = payload["compact_summary"]
+    assert (
+        compact_summary["what_changed"]
+        == "Session is waiting for running work to be verified before deciding the next transition."
+    )
+    assert (
+        compact_summary["what_remains"]
+        == "Review verification results for active jobs."
+    )
+    assert compact_summary["operator_requirement"] == "operator input not required"
+    assert (
+        compact_summary["what_passed"]
+        == "Runtime work is still active and available for verification review."
+    )
+    assert (
+        compact_summary["what_failed"]
+        == "No verification outcome has been recorded yet for the active jobs."
+    )
+
+
+def test_watch_orchestrator_session_decision_state_replans_for_failed_terminal_jobs() -> (
+    None
+):
+    repository = _repository()
+    session = repository.create_orchestrator_session(
+        repo="owner/repo",
+        host_tool="claude_code",
+        started_by="operator",
+        watch_scope_json={"story_issue_numbers": [123]},
+    )
+    repository.record_orchestrator_session_job(
+        session_id=session.id,
+        job={
+            "id": 11,
+            "job_kind": "story_worker",
+            "status": "failed",
+            "story_issue_number": 123,
+        },
+    )
+
+    payload = watch_orchestrator_session(repository=repository, session_id=session.id)
+
+    assert payload["current_phase"] == "decide_next"
+    assert payload["decision_state"]["decision"] == "replan"
+    assert payload["decision_state"]["requires_operator"] is False
+
+
+def test_watch_orchestrator_session_decision_state_continues_for_successful_terminal_jobs() -> (
+    None
+):
+    repository = _repository()
+    session = repository.create_orchestrator_session(
+        repo="owner/repo",
+        host_tool="claude_code",
+        started_by="operator",
+        watch_scope_json={"story_issue_numbers": [123]},
+    )
+    repository.record_orchestrator_session_job(
+        session_id=session.id,
+        job={
+            "id": 11,
+            "job_kind": "story_worker",
+            "status": "completed",
+            "story_issue_number": 123,
+        },
+    )
+
+    payload = watch_orchestrator_session(repository=repository, session_id=session.id)
+
+    assert payload["current_phase"] == "decide_next"
+    assert payload["decision_state"]["decision"] == "continue"
     assert payload["decision_state"]["requires_operator"] is False
 
 
@@ -457,6 +546,47 @@ def test_handle_orchestrator_session_action_can_reject_and_revise_intent() -> No
 
     assert rejected["intent"].status == "rejected"
     assert revised["intent"].status == "awaiting_clarification"
+
+
+def test_handle_orchestrator_session_action_can_record_replan() -> None:
+    repository = _repository()
+    session = repository.create_orchestrator_session(
+        repo="owner/repo",
+        host_tool="claude_code",
+        started_by="operator",
+        plan_version=1,
+        next_action_json={"action_kind": "observe_runtime"},
+        milestones_json=[{"milestone_id": "m1", "status": "active"}],
+    )
+
+    result = handle_orchestrator_session_action(
+        repository=repository,
+        session_id=session.id,
+        action_type="record_replan",
+        payload={
+            "current_phase": "plan",
+            "plan_summary": "Revise plan after verifier feedback.",
+            "handoff_summary": "Verifier failed; replan required.",
+            "next_action_json": {"action_kind": "replan"},
+            "milestones_json": [{"milestone_id": "m2", "status": "active"}],
+            "plan_version": 2,
+            "supersedes_plan_id": "plan-v1",
+            "replan_event": {
+                "trigger_type": "verification_failure",
+                "previous_plan_id": "plan-v1",
+                "new_plan_id": "plan-v2",
+            },
+            "completion_contract_json": {"approval_required": False},
+        },
+    )
+
+    assert result["action"] == "record_replan"
+    updated = result["session"]
+    assert updated.plan_version == 2
+    assert updated.supersedes_plan_id == "plan-v1"
+    assert updated.next_action_json["action_kind"] == "replan"
+    assert updated.milestones_json[0]["milestone_id"] == "m2"
+    assert updated.replan_events_json[0]["new_plan_id"] == "plan-v2"
 
 
 def test_launch_supervisor_for_orchestrator_session_passes_session_id(tmp_path) -> None:

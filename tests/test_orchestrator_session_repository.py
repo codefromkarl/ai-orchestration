@@ -186,3 +186,52 @@ def test_postgres_repository_persists_orchestrator_session_completion_contract(
         "task_verifier",
         "pytest",
     ]
+
+
+@pytest.mark.usefixtures("postgres_test_db")
+def test_postgres_repository_updates_orchestrator_session_plan_artifacts(
+    postgres_test_db: str,
+):
+    with psycopg.connect(
+        postgres_test_db, row_factory=cast(Any, dict_row)
+    ) as connection:
+        repository = PostgresControlPlaneRepository(connection)
+
+        session = repository.create_orchestrator_session(
+            repo="owner/repo",
+            host_tool="claude_code",
+            started_by="operator",
+            watch_scope_json={"story_issue_numbers": [123]},
+            plan_version=1,
+            next_action_json={"action_kind": "observe_runtime"},
+            milestones_json=[{"milestone_id": "m1", "status": "active"}],
+            replan_events_json=[],
+        )
+
+        updated = repository.update_orchestrator_session_plan_artifacts(
+            session_id=session.id,
+            current_phase="plan",
+            plan_summary="Revise plan after verifier feedback.",
+            handoff_summary="Verifier failed; replan required.",
+            next_action_json={"action_kind": "replan"},
+            milestones_json=[{"milestone_id": "m2", "status": "active"}],
+            plan_version=2,
+            supersedes_plan_id="plan-v1",
+            replan_events_json=[
+                {
+                    "trigger_type": "verification_failure",
+                    "previous_plan_id": "plan-v1",
+                    "new_plan_id": "plan-v2",
+                }
+            ],
+            completion_contract_json={"approval_required": False},
+        )
+
+        loaded = repository.get_orchestrator_session(session.id)
+
+    assert updated.plan_version == 2
+    assert loaded is not None
+    assert loaded.plan_summary == "Revise plan after verifier feedback."
+    assert loaded.next_action_json["action_kind"] == "replan"
+    assert loaded.milestones_json[0]["milestone_id"] == "m2"
+    assert loaded.replan_events_json[0]["new_plan_id"] == "plan-v2"

@@ -357,6 +357,20 @@ class ControlPlaneRepository(
     def set_orchestrator_session_status(
         self, *, session_id: str, status: str
     ) -> OrchestratorSession: ...
+    def update_orchestrator_session_plan_artifacts(
+        self,
+        *,
+        session_id: str,
+        current_phase: str,
+        plan_summary: str | None,
+        handoff_summary: str | None,
+        next_action_json: dict[str, Any],
+        milestones_json: list[dict[str, Any]],
+        plan_version: int,
+        supersedes_plan_id: str | None,
+        replan_events_json: list[dict[str, Any]],
+        completion_contract_json: dict[str, Any] | None = None,
+    ) -> OrchestratorSession: ...
     def record_orchestrator_session_job(
         self, *, session_id: str, job: dict[str, Any]
     ) -> None: ...

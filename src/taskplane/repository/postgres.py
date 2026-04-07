@@ -1369,6 +1369,62 @@ class PostgresControlPlaneRepository:
         self._connection.commit()
         return self._row_to_orchestrator_session(row)
 
+    def update_orchestrator_session_plan_artifacts(
+        self,
+        *,
+        session_id: str,
+        current_phase: str,
+        plan_summary: str | None,
+        handoff_summary: str | None,
+        next_action_json: dict[str, Any],
+        milestones_json: list[dict[str, Any]],
+        plan_version: int,
+        supersedes_plan_id: str | None,
+        replan_events_json: list[dict[str, Any]],
+        completion_contract_json: dict[str, Any] | None = None,
+    ) -> OrchestratorSession:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE orchestrator_session
+                SET current_phase = %s,
+                    plan_summary = %s,
+                    handoff_summary = %s,
+                    next_action_json = %s::jsonb,
+                    milestones_json = %s::jsonb,
+                    plan_version = %s,
+                    supersedes_plan_id = %s,
+                    replan_events_json = %s::jsonb,
+                    completion_contract_json = COALESCE(%s::jsonb, completion_contract_json),
+                    updated_at = NOW()
+                WHERE id = %s
+                RETURNING id, repo, host_tool, started_by, status, watch_scope_json,
+                          current_phase, objective_summary, plan_summary, handoff_summary,
+                          next_action_json, milestones_json, plan_version,
+                          supersedes_plan_id, replan_events_json, completion_contract_json,
+                          created_at, updated_at
+                """,
+                (
+                    current_phase,
+                    plan_summary,
+                    handoff_summary,
+                    json.dumps(next_action_json),
+                    json.dumps(milestones_json),
+                    int(plan_version or 1),
+                    supersedes_plan_id,
+                    json.dumps(replan_events_json),
+                    (
+                        json.dumps(completion_contract_json)
+                        if completion_contract_json is not None
+                        else None
+                    ),
+                    session_id,
+                ),
+            )
+            row = cursor.fetchone()
+        self._connection.commit()
+        return self._row_to_orchestrator_session(row)
+
     def record_orchestrator_session_job(
         self, *, session_id: str, job: dict[str, Any]
     ) -> None:

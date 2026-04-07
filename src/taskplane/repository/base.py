@@ -803,6 +803,40 @@ class InMemoryControlPlaneRepository:
         self.orchestrator_sessions[session_id] = updated
         return updated
 
+    def update_orchestrator_session_plan_artifacts(
+        self,
+        *,
+        session_id: str,
+        current_phase: str,
+        plan_summary: str | None,
+        handoff_summary: str | None,
+        next_action_json: dict[str, Any],
+        milestones_json: list[dict[str, Any]],
+        plan_version: int,
+        supersedes_plan_id: str | None,
+        replan_events_json: list[dict[str, Any]],
+        completion_contract_json: dict[str, Any] | None = None,
+    ) -> OrchestratorSession:
+        session = self.orchestrator_sessions[session_id]
+        updated = replace(
+            session,
+            current_phase=cast(Any, current_phase),
+            plan_summary=plan_summary,
+            handoff_summary=handoff_summary,
+            next_action_json=dict(next_action_json),
+            milestones_json=[dict(item) for item in milestones_json],
+            plan_version=int(plan_version or 1),
+            supersedes_plan_id=supersedes_plan_id,
+            replan_events_json=[dict(item) for item in replan_events_json],
+            completion_contract_json=dict(
+                completion_contract_json
+                if completion_contract_json is not None
+                else session.completion_contract_json
+            ),
+        )
+        self.orchestrator_sessions[session_id] = updated
+        return updated
+
     def record_orchestrator_session_job(
         self, *, session_id: str, job: dict[str, Any]
     ) -> None:

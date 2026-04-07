@@ -193,8 +193,11 @@ def _derive_session_phase(
         return "escalate"
     if intents:
         return "plan"
-    if jobs:
+    job_outcome = _classify_session_jobs(jobs)
+    if job_outcome == "running":
         return "verify"
+    if job_outcome in {"failed", "succeeded"}:
+        return "decide_next"
     return "observe"
 
 
@@ -222,7 +225,132 @@ def _build_compact_summary(
         "handoff_summary": (
             f"{len(blocked_tasks)} blocked task(s), {len(intents)} pending intent(s), {len(jobs)} running job(s)."
         ),
+        "what_changed": _build_compact_what_changed(
+            current_phase=current_phase,
+            blocked_tasks=blocked_tasks,
+            intents=intents,
+            jobs=jobs,
+        ),
+        "what_remains": _build_compact_what_remains(
+            current_phase=current_phase,
+            blocked_tasks=blocked_tasks,
+            intents=intents,
+            jobs=jobs,
+        ),
+        "what_passed": _build_compact_what_passed(
+            current_phase=current_phase,
+            blocked_tasks=blocked_tasks,
+            intents=intents,
+            jobs=jobs,
+        ),
+        "what_failed": _build_compact_what_failed(
+            current_phase=current_phase,
+            blocked_tasks=blocked_tasks,
+            intents=intents,
+            jobs=jobs,
+        ),
+        "operator_requirement": (
+            "operator input required"
+            if any(getattr(task, "decision_required", False) for task in blocked_tasks)
+            else "operator input not required"
+        ),
     }
+
+
+def _build_compact_what_changed(
+    *,
+    current_phase: str,
+    blocked_tasks: list[Any],
+    intents: list[Any],
+    jobs: list[dict[str, Any]],
+) -> str:
+    if any(getattr(task, "decision_required", False) for task in blocked_tasks):
+        return "Session is waiting on blocked work triage before the loop can continue."
+    if intents:
+        return "Session is waiting on pending intents before the plan can advance."
+    job_outcome = _classify_session_jobs(jobs)
+    if jobs and current_phase == "verify":
+        return "Session is waiting for running work to be verified before deciding the next transition."
+    if job_outcome == "failed" and current_phase == "decide_next":
+        return "Session observed failed terminal job outcomes and must decide whether to replan."
+    if job_outcome == "succeeded" and current_phase == "decide_next":
+        return "Session observed successful terminal job outcomes and can decide how to continue."
+    if jobs:
+        return "Session has running work that will influence the next loop transition."
+    return "Session is ready to continue with the next loop transition."
+
+
+def _build_compact_what_remains(
+    *,
+    current_phase: str,
+    blocked_tasks: list[Any],
+    intents: list[Any],
+    jobs: list[dict[str, Any]],
+) -> str:
+    if any(getattr(task, "decision_required", False) for task in blocked_tasks):
+        if jobs:
+            return "Resolve blocked tasks and clear running-job verification state."
+        return "Resolve blocked tasks before continuing the loop."
+    if intents:
+        return "Resolve pending intents before continuing the loop."
+    job_outcome = _classify_session_jobs(jobs)
+    if jobs and current_phase == "verify":
+        return "Review verification results for active jobs."
+    if job_outcome == "failed" and current_phase == "decide_next":
+        return "Record a replan or other next-step decision for failed job outcomes."
+    if job_outcome == "succeeded" and current_phase == "decide_next":
+        return "Select the next transition after successful verification outcomes."
+    if jobs:
+        return "Observe active jobs and decide the next transition."
+    return "Select the next action for the loop."
+
+
+def _build_compact_what_passed(
+    *,
+    current_phase: str,
+    blocked_tasks: list[Any],
+    intents: list[Any],
+    jobs: list[dict[str, Any]],
+) -> str:
+    if any(getattr(task, "decision_required", False) for task in blocked_tasks):
+        return "Session context refresh completed for current blocked and running work."
+    if intents:
+        return "Current session context is available for planning review."
+    job_outcome = _classify_session_jobs(jobs)
+    if jobs and current_phase == "verify":
+        return "Runtime work is still active and available for verification review."
+    if job_outcome == "failed" and current_phase == "decide_next":
+        return "Verification completed and exposed failed job outcomes for decision review."
+    if job_outcome == "succeeded" and current_phase == "decide_next":
+        return "Verification completed successfully for the observed terminal jobs."
+    if jobs:
+        return "Active jobs are available for the next loop decision."
+    return "No active blockers prevent the loop from preparing its next action."
+
+
+def _build_compact_what_failed(
+    *,
+    current_phase: str,
+    blocked_tasks: list[Any],
+    intents: list[Any],
+    jobs: list[dict[str, Any]],
+) -> str:
+    if any(getattr(task, "decision_required", False) for task in blocked_tasks):
+        return "Blocked tasks still prevent the loop from continuing automatically."
+    if intents:
+        return "Pending intents still prevent the plan from advancing automatically."
+    job_outcome = _classify_session_jobs(jobs)
+    if jobs and current_phase == "verify":
+        return "No verification outcome has been recorded yet for the active jobs."
+    if job_outcome == "failed" and current_phase == "decide_next":
+        return (
+            "Failed job outcomes prevent the loop from continuing without a new plan."
+        )
+    if job_outcome == "succeeded" and current_phase == "decide_next":
+        return "No failed job outcomes are currently blocking continuation."
+    if jobs:
+        return "The loop cannot advance until active job outcomes are reviewed."
+    return "No failure is currently preventing the loop from continuing."
 
 
 def _build_next_action(
@@ -349,10 +477,25 @@ def _build_decision_state(
             "requires_operator": False,
             "current_phase": current_phase,
         }
-    if jobs:
+    job_outcome = _classify_session_jobs(jobs)
+    if job_outcome == "running":
         return {
             "decision": "verify",
             "reason": "running jobs need verification before the next transition",
+            "requires_operator": False,
+            "current_phase": current_phase,
+        }
+    if job_outcome == "failed":
+        return {
+            "decision": "replan",
+            "reason": "verification observed failed job outcomes that require a new plan",
+            "requires_operator": False,
+            "current_phase": current_phase,
+        }
+    if job_outcome == "succeeded":
+        return {
+            "decision": "continue",
+            "reason": "verification observed successful job outcomes and the loop can continue",
             "requires_operator": False,
             "current_phase": current_phase,
         }
@@ -428,7 +571,50 @@ def handle_orchestrator_session_action(
             feedback=str(payload["feedback"]),
         )
         return {"action": action_type, "session": session, "intent": intent}
+    if action_type == "record_replan":
+        existing_events = list(getattr(session, "replan_events_json", []) or [])
+        replan_event = dict(payload["replan_event"])
+        updated_session = repository.update_orchestrator_session_plan_artifacts(
+            session_id=session_id,
+            current_phase=str(payload.get("current_phase") or "plan"),
+            plan_summary=(
+                str(payload["plan_summary"]) if payload.get("plan_summary") else None
+            ),
+            handoff_summary=(
+                str(payload["handoff_summary"])
+                if payload.get("handoff_summary")
+                else None
+            ),
+            next_action_json=dict(payload.get("next_action_json") or {}),
+            milestones_json=list(payload.get("milestones_json") or []),
+            plan_version=int(payload.get("plan_version") or session.plan_version),
+            supersedes_plan_id=(
+                str(payload["supersedes_plan_id"])
+                if payload.get("supersedes_plan_id") is not None
+                else None
+            ),
+            replan_events_json=existing_events + [replan_event],
+            completion_contract_json=(
+                dict(payload["completion_contract_json"])
+                if payload.get("completion_contract_json") is not None
+                else None
+            ),
+        )
+        return {"action": action_type, "session": updated_session}
     raise ValueError(f"unsupported action_type: {action_type}")
+
+
+def _classify_session_jobs(jobs: list[dict[str, Any]]) -> str | None:
+    if not jobs:
+        return None
+    statuses = {str(job.get("status") or "").lower() for job in jobs}
+    if "running" in statuses:
+        return "running"
+    if statuses & {"failed", "error"}:
+        return "failed"
+    if statuses <= {"completed", "done", "succeeded", "success"}:
+        return "succeeded"
+    return "running"
 
 
 def launch_supervisor_for_orchestrator_session(
