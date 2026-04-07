@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+kind="${1:-}"
+if [[ -z "${kind}" ]]; then
+  echo "usage: /tp-contract <smoke-suite|threshold-profile>" >&2
+  exit 1
+fi
+
+exec taskplane-eval-contract --kind "${kind}"
