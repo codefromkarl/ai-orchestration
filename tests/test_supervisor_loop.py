@@ -1915,6 +1915,208 @@ def test_run_supervisor_iteration_plan_phase_allows_decomposition_but_blocks_sto
     assert insert_params[0][1] == "story_decomposition"
 
 
+def test_run_supervisor_iteration_skips_launch_when_decide_next_requires_replan(
+    tmp_path,
+):
+    insert_params: list[tuple[object, ...]] = []
+
+    class FakeSession:
+        current_phase = "decide_next"
+        replan_events_json = [{"trigger_type": "verification_failure"}]
+
+    class FakeRepository:
+        def __init__(self, connection) -> None:
+            self.connection = connection
+            self.story_dependencies = []
+
+        def sync_ready_states(self) -> None:
+            return None
+
+        def get_orchestrator_session(self, session_id: str):
+            assert session_id == "orch-decide-next"
+            return FakeSession()
+
+        def list_program_stories_for_epic(self, *, repo: str, epic_issue_number: int):
+            return []
+
+        def list_story_work_item_ids(self, story_issue_number: int) -> list[str]:
+            return []
+
+        def get_work_item(self, work_id: str) -> Any:
+            return None
+
+        def get_epic_execution_state(self, *, repo: str, epic_issue_number: int) -> Any:
+            return None
+
+        def upsert_epic_execution_state(self, state: Any) -> None:
+            return None
+
+        def record_operator_request(self, request: Any) -> int | None:
+            return None
+
+    class FakeCursor:
+        def __init__(self) -> None:
+            self.last_sql = ""
+
+        def execute(self, sql, params=None):
+            self.last_sql = sql
+            if "INSERT INTO execution_job" in sql and params is not None:
+                insert_params.append(tuple(params))
+
+        def fetchall(self):
+            if "FROM execution_job" in self.last_sql:
+                return []
+            if "FROM work_claim" in self.last_sql:
+                return []
+            if "FROM work_dependency" in self.last_sql:
+                return []
+            if "FROM v_epic_decomposition_queue" in self.last_sql:
+                return []
+            if "FROM v_story_decomposition_queue" in self.last_sql:
+                return []
+            if "FROM program_story ps" in self.last_sql:
+                return [{"story_issue_number": 41, "epic_issue_number": 11}]
+            if "FROM v_active_task_queue" in self.last_sql:
+                return []
+            return []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+    class FakeConnection:
+        def cursor(self):
+            return FakeCursor()
+
+        def commit(self):
+            return None
+
+    class FakeProcess:
+        pid = 8203
+
+        def poll(self):
+            return None
+
+    launched = run_supervisor_iteration(
+        connection=FakeConnection(),
+        repo="codefromkarl/stardrifter",
+        dsn="postgresql://user:pass@localhost/db",
+        project_dir=tmp_path,
+        log_dir=tmp_path / "logs",
+        worktree_root=tmp_path / "worktrees",
+        max_parallel_jobs=1,
+        launcher=lambda command, log_path: FakeProcess(),
+        orchestrator_session_id="orch-decide-next",
+        repository_builder=FakeRepository,
+    )
+
+    assert launched == 0
+    assert insert_params == []
+
+
+def test_run_supervisor_iteration_allows_launch_when_decide_next_can_continue(
+    tmp_path,
+):
+    insert_params: list[tuple[object, ...]] = []
+
+    class FakeSession:
+        current_phase = "decide_next"
+        replan_events_json = []
+
+    class FakeRepository:
+        def __init__(self, connection) -> None:
+            self.connection = connection
+            self.story_dependencies = []
+
+        def sync_ready_states(self) -> None:
+            return None
+
+        def get_orchestrator_session(self, session_id: str):
+            assert session_id == "orch-continue"
+            return FakeSession()
+
+        def list_program_stories_for_epic(self, *, repo: str, epic_issue_number: int):
+            return []
+
+        def list_story_work_item_ids(self, story_issue_number: int) -> list[str]:
+            return []
+
+        def get_work_item(self, work_id: str) -> Any:
+            return None
+
+        def get_epic_execution_state(self, *, repo: str, epic_issue_number: int) -> Any:
+            return None
+
+        def upsert_epic_execution_state(self, state: Any) -> None:
+            return None
+
+        def record_operator_request(self, request: Any) -> int | None:
+            return None
+
+    class FakeCursor:
+        def __init__(self) -> None:
+            self.last_sql = ""
+
+        def execute(self, sql, params=None):
+            self.last_sql = sql
+            if "INSERT INTO execution_job" in sql and params is not None:
+                insert_params.append(tuple(params))
+
+        def fetchall(self):
+            if "FROM execution_job" in self.last_sql:
+                return []
+            if "FROM work_claim" in self.last_sql:
+                return []
+            if "FROM work_dependency" in self.last_sql:
+                return []
+            if "FROM v_epic_decomposition_queue" in self.last_sql:
+                return []
+            if "FROM v_story_decomposition_queue" in self.last_sql:
+                return []
+            if "FROM program_story ps" in self.last_sql:
+                return [{"story_issue_number": 41, "epic_issue_number": 11}]
+            if "FROM v_active_task_queue" in self.last_sql:
+                return []
+            return []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+    class FakeConnection:
+        def cursor(self):
+            return FakeCursor()
+
+        def commit(self):
+            return None
+
+    class FakeProcess:
+        pid = 8204
+
+        def poll(self):
+            return None
+
+    launched = run_supervisor_iteration(
+        connection=FakeConnection(),
+        repo="codefromkarl/stardrifter",
+        dsn="postgresql://user:pass@localhost/db",
+        project_dir=tmp_path,
+        log_dir=tmp_path / "logs",
+        worktree_root=tmp_path / "worktrees",
+        max_parallel_jobs=1,
+        launcher=lambda command, log_path: FakeProcess(),
+        orchestrator_session_id="orch-continue",
+        repository_builder=FakeRepository,
+    )
+
+    assert launched == 1
+    assert insert_params[0][-1] == "orch-continue"
+
+
 def test_run_supervisor_iteration_prefers_epic_iteration_story_selection_over_completion_queue(
     tmp_path,
     monkeypatch,

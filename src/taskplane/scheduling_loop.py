@@ -148,6 +148,10 @@ def run_supervisor_iteration(
             session_phase = str(getattr(session, "current_phase", "") or "")
             if session_phase in {"escalate", "suspend", "verify"}:
                 return 0
+            if session_phase == "decide_next" and list(
+                getattr(session, "replan_events_json", []) or []
+            ):
+                return 0
 
     launched = 0
     running_claim_paths = _load_active_claim_paths(connection=connection, repo=repo)
