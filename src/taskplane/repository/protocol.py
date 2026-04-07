@@ -15,6 +15,7 @@ from ..models import (
     GuardrailViolation,
     NaturalLanguageIntent,
     OperatorRequest,
+    OrchestratorSession,
     ProgramStory,
     QueueEvaluation,
     StoryIntegrationRun,
@@ -327,4 +328,32 @@ class ControlPlaneRepository(
         intent_id: str,
         proposal: dict[str, Any],
         approver: str,
+        promotion_mode: str | None = None,
     ) -> int: ...
+    def create_orchestrator_session(
+        self,
+        *,
+        repo: str,
+        host_tool: str,
+        started_by: str,
+        watch_scope_json: dict[str, Any] | None = None,
+        current_phase: str = "observe",
+        objective_summary: str | None = None,
+        plan_summary: str | None = None,
+        handoff_summary: str | None = None,
+    ) -> OrchestratorSession: ...
+    def get_orchestrator_session(
+        self, session_id: str
+    ) -> OrchestratorSession | None: ...
+    def update_orchestrator_session_scope(
+        self, *, session_id: str, watch_scope_json: dict[str, Any]
+    ) -> OrchestratorSession: ...
+    def set_orchestrator_session_status(
+        self, *, session_id: str, status: str
+    ) -> OrchestratorSession: ...
+    def record_orchestrator_session_job(
+        self, *, session_id: str, job: dict[str, Any]
+    ) -> None: ...
+    def list_orchestrator_session_jobs(
+        self, session_id: str
+    ) -> list[dict[str, Any]]: ...

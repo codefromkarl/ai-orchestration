@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 import secrets
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -19,6 +20,7 @@ from ..models import (
     GuardrailViolation,
     NaturalLanguageIntent,
     OperatorRequest,
+    OrchestratorSession,
     ProgramStory,
     QueueEvaluation,
     StoryIntegrationRun,
@@ -74,6 +76,25 @@ from ._postgres_row_mapping import (
 LEASE_DURATION = timedelta(minutes=15)
 INTAKE_EPIC_START = 1_500_000_000
 INTAKE_STORY_START = 1_600_000_000
+
+
+def _orchestrator_session_status(value: Any) -> str:
+    raw = str(value or "active")
+    return raw if raw in {"active", "paused", "closed"} else "active"
+
+
+def _orchestrator_session_phase(value: Any) -> str:
+    raw = str(value or "observe")
+    allowed = {
+        "observe",
+        "plan",
+        "act",
+        "verify",
+        "decide_next",
+        "escalate",
+        "suspend",
+    }
+    return raw if raw in allowed else "observe"
 
 
 class PostgresControlPlaneRepository:
@@ -492,9 +513,7 @@ class PostgresControlPlaneRepository:
             if self._value(row, "id") is not None
         }
 
-    def _apply_ready_state_transitions(
-        self, cursor: Any, ready_ids: set[str]
-    ) -> None:
+    def _apply_ready_state_transitions(self, cursor: Any, ready_ids: set[str]) -> None:
         ready_id_list = sorted(ready_ids)
         cursor.execute(
             """
@@ -1230,12 +1249,158 @@ class PostgresControlPlaneRepository:
             rows = cursor.fetchall()
         return [row_to_natural_language_intent(row) for row in rows]
 
+    def create_orchestrator_session(
+        self,
+        *,
+        repo: str,
+        host_tool: str,
+        started_by: str,
+        watch_scope_json: dict[str, Any] | None = None,
+        current_phase: str = "observe",
+        objective_summary: str | None = None,
+        plan_summary: str | None = None,
+        handoff_summary: str | None = None,
+    ) -> OrchestratorSession:
+        session_id = f"orch-{uuid.uuid4().hex[:12]}"
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO orchestrator_session (
+                    id, repo, host_tool, started_by, status, watch_scope_json,
+                    current_phase, objective_summary, plan_summary, handoff_summary
+                ) VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s)
+                RETURNING id, repo, host_tool, started_by, status, watch_scope_json,
+                          current_phase, objective_summary, plan_summary, handoff_summary,
+                          created_at, updated_at
+                """,
+                (
+                    session_id,
+                    repo,
+                    host_tool,
+                    started_by,
+                    "active",
+                    json.dumps(watch_scope_json or {}),
+                    current_phase,
+                    objective_summary,
+                    plan_summary,
+                    handoff_summary,
+                ),
+            )
+            row = cursor.fetchone()
+        self._connection.commit()
+        return self._row_to_orchestrator_session(row)
+
+    def get_orchestrator_session(self, session_id: str) -> OrchestratorSession | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id, repo, host_tool, started_by, status, watch_scope_json,
+                       current_phase, objective_summary, plan_summary, handoff_summary,
+                       created_at, updated_at
+                FROM orchestrator_session
+                WHERE id = %s
+                """,
+                (session_id,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        return self._row_to_orchestrator_session(row)
+
+    def update_orchestrator_session_scope(
+        self, *, session_id: str, watch_scope_json: dict[str, Any]
+    ) -> OrchestratorSession:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE orchestrator_session
+                SET watch_scope_json = %s::jsonb,
+                    updated_at = NOW()
+                WHERE id = %s
+                RETURNING id, repo, host_tool, started_by, status, watch_scope_json,
+                          current_phase, objective_summary, plan_summary, handoff_summary,
+                          created_at, updated_at
+                """,
+                (json.dumps(watch_scope_json), session_id),
+            )
+            row = cursor.fetchone()
+        self._connection.commit()
+        return self._row_to_orchestrator_session(row)
+
+    def set_orchestrator_session_status(
+        self, *, session_id: str, status: str
+    ) -> OrchestratorSession:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE orchestrator_session
+                SET status = %s,
+                    updated_at = NOW()
+                WHERE id = %s
+                RETURNING id, repo, host_tool, started_by, status, watch_scope_json,
+                          current_phase, objective_summary, plan_summary, handoff_summary,
+                          created_at, updated_at
+                """,
+                (status, session_id),
+            )
+            row = cursor.fetchone()
+        self._connection.commit()
+        return self._row_to_orchestrator_session(row)
+
+    def record_orchestrator_session_job(
+        self, *, session_id: str, job: dict[str, Any]
+    ) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO execution_job (
+                    id, repo, job_kind, status, story_issue_number, work_id,
+                    worker_name, pid, command, log_path, orchestrator_session_id
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s
+                )
+                ON CONFLICT (id) DO UPDATE SET
+                    orchestrator_session_id = EXCLUDED.orchestrator_session_id
+                """,
+                (
+                    int(job.get("id") or 0),
+                    str(job.get("repo") or ""),
+                    str(job.get("job_kind") or "unknown"),
+                    str(job.get("status") or "running"),
+                    job.get("story_issue_number"),
+                    job.get("work_id"),
+                    str(job.get("worker_name") or f"orchestrator-{session_id}"),
+                    job.get("pid"),
+                    str(job.get("command") or "orchestrator-session"),
+                    str(job.get("log_path") or ""),
+                    session_id,
+                ),
+            )
+        self._connection.commit()
+
+    def list_orchestrator_session_jobs(self, session_id: str) -> list[dict[str, Any]]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id, repo, job_kind, status, story_issue_number, work_id,
+                       worker_name, pid, command, log_path, orchestrator_session_id
+                FROM execution_job
+                WHERE orchestrator_session_id = %s
+                ORDER BY id
+                """,
+                (session_id,),
+            )
+            rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
     def promote_natural_language_proposal(
         self,
         *,
         intent_id: str,
         proposal: dict[str, Any],
         approver: str,
+        promotion_mode: str | None = None,
     ) -> int:
         intent = self.get_natural_language_intent(intent_id)
         if intent is None:
@@ -1248,6 +1413,7 @@ class PostgresControlPlaneRepository:
                 intent_id=intent_id,
                 approver=approver,
                 proposal=proposal,
+                promotion_mode=promotion_mode,
                 intake_epic_start=INTAKE_EPIC_START,
                 intake_story_start=INTAKE_STORY_START,
                 value_reader=self._value,
@@ -1398,6 +1564,27 @@ class PostgresControlPlaneRepository:
 
     def _row_to_operator_request(self, row: Any) -> OperatorRequest:
         return row_to_operator_request(row)
+
+    def _row_to_orchestrator_session(self, row: Any) -> OrchestratorSession:
+        return OrchestratorSession(
+            id=str(self._value(row, "id")),
+            repo=str(self._value(row, "repo")),
+            host_tool=str(self._value(row, "host_tool")),
+            started_by=str(self._value(row, "started_by")),
+            status=cast(Any, _orchestrator_session_status(self._value(row, "status"))),
+            watch_scope_json=dict(self._value_optional(row, "watch_scope_json") or {}),
+            current_phase=cast(
+                Any,
+                _orchestrator_session_phase(
+                    self._value_optional(row, "current_phase") or "observe"
+                ),
+            ),
+            objective_summary=self._value_optional(row, "objective_summary"),
+            plan_summary=self._value_optional(row, "plan_summary"),
+            handoff_summary=self._value_optional(row, "handoff_summary"),
+            created_at=self._value_optional(row, "created_at"),
+            updated_at=self._value_optional(row, "updated_at"),
+        )
 
     def _value(self, row: Any, key: str) -> Any:
         return value(row, key)

@@ -32,6 +32,10 @@ def start_orchestrator_session(
         host_tool=host_tool,
         started_by=started_by,
         watch_scope_json={},
+        current_phase="plan",
+        objective_summary=f"Advance repo {repo} through orchestrator session",
+        plan_summary="Launch work, observe runtime facts, and decide whether to continue, verify, or escalate.",
+        handoff_summary="Session started; waiting for runtime observations and verification evidence.",
     )
     launch_payload = launch_fn(
         repo=repo,

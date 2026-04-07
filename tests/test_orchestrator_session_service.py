@@ -57,6 +57,19 @@ def test_start_orchestrator_session_creates_session_and_tracks_launches() -> Non
     assert result.session.host_tool == "claude_code"
     assert result.launched_jobs[0]["story_issue_number"] == 123
     assert launched[0]["session_id"] == result.session.id
+    assert result.session.current_phase == "plan"
+    assert (
+        result.session.objective_summary
+        == "Advance repo owner/repo through orchestrator session"
+    )
+    assert (
+        result.session.plan_summary
+        == "Launch work, observe runtime facts, and decide whether to continue, verify, or escalate."
+    )
+    assert (
+        result.session.handoff_summary
+        == "Session started; waiting for runtime observations and verification evidence."
+    )
 
 
 def test_watch_orchestrator_session_returns_jobs_and_escalations() -> None:

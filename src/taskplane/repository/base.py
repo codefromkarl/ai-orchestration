@@ -22,6 +22,7 @@ from ..models import (
     GuardrailViolation,
     NaturalLanguageIntent,
     OperatorRequest,
+    OrchestratorSession,
     ProgramStory,
     QueueEvaluation,
     StoryIntegrationRun,
@@ -74,6 +75,10 @@ class InMemoryControlPlaneRepository:
     task_spec_drafts: list[TaskSpecDraft] = field(default_factory=list)
     approval_events: list[ApprovalEvent] = field(default_factory=list)
     natural_language_intents: dict[str, NaturalLanguageIntent] = field(
+        default_factory=dict
+    )
+    orchestrator_sessions: dict[str, OrchestratorSession] = field(default_factory=dict)
+    orchestrator_session_jobs: dict[str, list[dict[str, Any]]] = field(
         default_factory=dict
     )
     _claim_lock: threading.RLock = field(
@@ -574,8 +579,14 @@ class InMemoryControlPlaneRepository:
         intent_id: str,
         proposal: dict[str, Any],
         approver: str,
+        promotion_mode: str | None = None,
     ) -> int:
         intent = self.natural_language_intents[intent_id]
+        normalized_mode = (
+            str(promotion_mode or proposal.get("promotion_mode") or "local")
+            .strip()
+            .lower()
+        )
         epic_issue_number = INTAKE_EPIC_START + len(self.natural_language_intents)
         epic_payload = proposal.get("epic") if isinstance(proposal, dict) else {}
         if not isinstance(epic_payload, dict):
@@ -599,7 +610,11 @@ class InMemoryControlPlaneRepository:
                     repo=intent.repo,
                     epic_issue_number=epic_issue_number,
                     title=str(story_payload.get("title") or f"Story {index}"),
-                    lane=str(story_payload.get("lane") or epic_payload.get("lane") or "Lane 01"),
+                    lane=str(
+                        story_payload.get("lane")
+                        or epic_payload.get("lane")
+                        or "Lane 01"
+                    ),
                     complexity=str(story_payload.get("complexity") or "medium"),
                     program_status="approved",
                     execution_status="active",
@@ -625,23 +640,36 @@ class InMemoryControlPlaneRepository:
                     continue
                 work_id = f"intent-{intent_id}-t{story_index}-{task_index}"
                 planned_paths_raw = task_payload.get("planned_paths")
-                planned_paths = tuple(
-                    str(path)
-                    for path in planned_paths_raw
-                    if isinstance(path, str) and path.strip()
-                ) if isinstance(planned_paths_raw, list) else ()
+                planned_paths = (
+                    tuple(
+                        str(path)
+                        for path in planned_paths_raw
+                        if isinstance(path, str) and path.strip()
+                    )
+                    if isinstance(planned_paths_raw, list)
+                    else ()
+                )
                 work_item = WorkItem(
                     id=work_id,
                     repo=intent.repo,
-                    title=str(task_payload.get("title") or f"Task {story_index}.{task_index}"),
-                    lane=str(task_payload.get("lane") or story_payload.get("lane") or epic_payload.get("lane") or "Lane 01"),
+                    title=str(
+                        task_payload.get("title") or f"Task {story_index}.{task_index}"
+                    ),
+                    lane=str(
+                        task_payload.get("lane")
+                        or story_payload.get("lane")
+                        or epic_payload.get("lane")
+                        or "Lane 01"
+                    ),
                     wave=str(task_payload.get("wave") or f"wave-{story_index}"),
                     status="pending",
                     task_type="core_path",
                     blocking_mode="hard",
                     canonical_story_issue_number=story_issue_number,
                     story_issue_numbers=(story_issue_number,),
-                    source_issue_number=story_issue_number,
+                    source_issue_number=None
+                    if normalized_mode == "local"
+                    else story_issue_number,
                     planned_paths=planned_paths,
                 )
                 self.work_items_by_id[work_id] = work_item
@@ -657,8 +685,16 @@ class InMemoryControlPlaneRepository:
                         complexity=str(story_payload.get("complexity") or "medium"),
                         goal=str(task_payload.get("title") or work_item.title),
                         allowed_paths=planned_paths,
-                        dod=tuple(str(item) for item in (task_payload.get("dod") or []) if str(item).strip()),
-                        verification=tuple(str(item) for item in (task_payload.get("verification") or []) if str(item).strip()),
+                        dod=tuple(
+                            str(item)
+                            for item in (task_payload.get("dod") or [])
+                            if str(item).strip()
+                        ),
+                        verification=tuple(
+                            str(item)
+                            for item in (task_payload.get("verification") or [])
+                            if str(item).strip()
+                        ),
                         references=(intent.id,),
                     )
                 )
@@ -708,6 +744,60 @@ class InMemoryControlPlaneRepository:
     def record_approval_event(self, event: ApprovalEvent) -> int | None:
         self.approval_events.append(event)
         return len(self.approval_events)
+
+    def create_orchestrator_session(
+        self,
+        *,
+        repo: str,
+        host_tool: str,
+        started_by: str,
+        watch_scope_json: dict[str, Any] | None = None,
+        current_phase: str = "observe",
+        objective_summary: str | None = None,
+        plan_summary: str | None = None,
+        handoff_summary: str | None = None,
+    ) -> OrchestratorSession:
+        session = OrchestratorSession(
+            id=f"orch-{secrets.token_hex(6)}",
+            repo=repo,
+            host_tool=host_tool,
+            started_by=started_by,
+            watch_scope_json=watch_scope_json or {},
+            current_phase=current_phase,
+            objective_summary=objective_summary,
+            plan_summary=plan_summary,
+            handoff_summary=handoff_summary,
+        )
+        self.orchestrator_sessions[session.id] = session
+        self.orchestrator_session_jobs.setdefault(session.id, [])
+        return session
+
+    def get_orchestrator_session(self, session_id: str) -> OrchestratorSession | None:
+        return self.orchestrator_sessions.get(session_id)
+
+    def update_orchestrator_session_scope(
+        self, *, session_id: str, watch_scope_json: dict[str, Any]
+    ) -> OrchestratorSession:
+        session = self.orchestrator_sessions[session_id]
+        updated = replace(session, watch_scope_json=watch_scope_json)
+        self.orchestrator_sessions[session_id] = updated
+        return updated
+
+    def set_orchestrator_session_status(
+        self, *, session_id: str, status: str
+    ) -> OrchestratorSession:
+        session = self.orchestrator_sessions[session_id]
+        updated = replace(session, status=status)
+        self.orchestrator_sessions[session_id] = updated
+        return updated
+
+    def record_orchestrator_session_job(
+        self, *, session_id: str, job: dict[str, Any]
+    ) -> None:
+        self.orchestrator_session_jobs.setdefault(session_id, []).append(dict(job))
+
+    def list_orchestrator_session_jobs(self, session_id: str) -> list[dict[str, Any]]:
+        return [dict(job) for job in self.orchestrator_session_jobs.get(session_id, [])]
 
     def finalize_work_attempt(
         self,

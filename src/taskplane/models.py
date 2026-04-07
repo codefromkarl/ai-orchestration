@@ -31,6 +31,16 @@ ExecutionStatus = Literal[
     "needs_story_refinement",
 ]
 EpicRuntimeStatus = Literal["backlog", "active", "awaiting_operator", "done"]
+OrchestratorSessionStatus = Literal["active", "paused", "closed"]
+OrchestratorSessionPhase = Literal[
+    "observe",
+    "plan",
+    "act",
+    "verify",
+    "decide_next",
+    "escalate",
+    "suspend",
+]
 EPIC_RUNTIME_STATUSES: tuple[EpicRuntimeStatus, ...] = (
     "backlog",
     "active",
@@ -256,6 +266,22 @@ class StoredAgentConfig:
     current_parallel: int = 0
     is_active: bool = True
     metadata: dict = field(default_factory=dict)
+    updated_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class OrchestratorSession:
+    id: str
+    repo: str
+    host_tool: str
+    started_by: str
+    status: OrchestratorSessionStatus = "active"
+    watch_scope_json: dict[str, Any] = field(default_factory=dict)
+    current_phase: OrchestratorSessionPhase = "observe"
+    objective_summary: str | None = None
+    plan_summary: str | None = None
+    handoff_summary: str | None = None
+    created_at: datetime | None = None
     updated_at: datetime | None = None
 
 

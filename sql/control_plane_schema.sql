@@ -143,6 +143,33 @@ CREATE TABLE IF NOT EXISTS work_claim (
     claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS orchestrator_session (
+    id TEXT PRIMARY KEY,
+    repo TEXT NOT NULL,
+    host_tool TEXT NOT NULL,
+    started_by TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    watch_scope_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    current_phase TEXT NOT NULL DEFAULT 'observe',
+    objective_summary TEXT,
+    plan_summary TEXT,
+    handoff_summary TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE orchestrator_session
+    ADD COLUMN IF NOT EXISTS current_phase TEXT NOT NULL DEFAULT 'observe';
+
+ALTER TABLE orchestrator_session
+    ADD COLUMN IF NOT EXISTS objective_summary TEXT;
+
+ALTER TABLE orchestrator_session
+    ADD COLUMN IF NOT EXISTS plan_summary TEXT;
+
+ALTER TABLE orchestrator_session
+    ADD COLUMN IF NOT EXISTS handoff_summary TEXT;
+
 ALTER TABLE work_claim
     ADD COLUMN IF NOT EXISTS lease_token TEXT;
 
@@ -449,6 +476,23 @@ ALTER TABLE execution_job
 
 ALTER TABLE execution_job
     ADD COLUMN IF NOT EXISTS launch_backend TEXT;
+
+ALTER TABLE execution_job
+    ADD COLUMN IF NOT EXISTS orchestrator_session_id TEXT;
+
+CREATE TABLE IF NOT EXISTS orchestrator_session (
+    id TEXT PRIMARY KEY,
+    repo TEXT NOT NULL,
+    host_tool TEXT NOT NULL,
+    started_by TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    watch_scope_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_execution_job_orchestrator_session_id
+    ON execution_job(orchestrator_session_id);
 
 CREATE TABLE IF NOT EXISTS work_commit_link (
     work_id TEXT PRIMARY KEY REFERENCES work_item(id) ON DELETE CASCADE,
