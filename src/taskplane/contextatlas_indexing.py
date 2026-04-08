@@ -58,6 +58,12 @@ class SnapshotObservation:
     lock_is_stale: bool
 
 
+@dataclass(frozen=True)
+class DeferredIgnoreSuggestion:
+    ignore_patterns: tuple[str, ...]
+    events: tuple[dict[str, Any], ...]
+
+
 class FileIndexRegistry:
     def __init__(self, path: Path) -> None:
         self._path = path
@@ -95,6 +101,16 @@ class FileIndexRegistry:
         artifact_payload = asdict(artifact)
         artifact_payload["updated_at"] = datetime.now(UTC).isoformat()
         payload["artifacts"][key] = artifact_payload
+        self._store(payload)
+
+    def record_deferred_event(self, event: dict[str, Any]) -> None:
+        payload = self._load()
+        events = payload.setdefault("deferred_events", [])
+        if not isinstance(events, list):
+            events = []
+            payload["deferred_events"] = events
+        events.append(event)
+        payload["deferred_events"] = events[-200:]
         self._store(payload)
 
     def lock_path_for_artifact(
@@ -308,7 +324,12 @@ class FileIndexRegistry:
 
     def _load(self) -> dict[str, Any]:
         if not self._path.exists():
-            return {"artifacts": {}, "checkout_aliases": {}, "updated_at": None}
+            return {
+                "artifacts": {},
+                "checkout_aliases": {},
+                "deferred_events": [],
+                "updated_at": None,
+            }
         return json.loads(self._path.read_text(encoding="utf-8"))
 
     def _artifact_age_seconds(
@@ -403,8 +424,27 @@ def ensure_contextatlas_index_for_checkout(
         )
         if existing is not None and existing.status == "ready":
             return None
+        ignore_suggestion = estimate_deferred_ignore_patterns(identity.repo_root)
+        if ignore_suggestion.ignore_patterns:
+            registry.record_deferred_event(
+                {
+                    "type": "auto_ignore_candidate",
+                    "repository_id": identity.repository_id,
+                    "snapshot_id": identity.snapshot_id,
+                    "repo_root": str(identity.repo_root),
+                    "ignored_patterns": list(ignore_suggestion.ignore_patterns),
+                    "details": list(ignore_suggestion.events),
+                    "created_at": datetime.now(UTC).isoformat(),
+                }
+            )
         registry.mark_building(identity)
-        error = _run_contextatlas_index(identity.project_dir)
+        if ignore_suggestion.ignore_patterns:
+            error = _run_contextatlas_index(
+                identity.project_dir,
+                extra_ignore_patterns=ignore_suggestion.ignore_patterns,
+            )
+        else:
+            error = _run_contextatlas_index(identity.project_dir)
         if error is None:
             registry.mark_ready(identity)
         else:
@@ -568,10 +608,219 @@ def _compute_dirty_snapshot_fingerprint(repo_root: Path) -> str:
     return digest.hexdigest()[:16]
 
 
-def _run_contextatlas_index(project_dir: Path) -> str | None:
+_DEFAULT_AUTO_IGNORE_THRESHOLD_BYTES = 128 * 1024 * 1024
+_MAX_AUTO_IGNORE_FILE_SAMPLES = 128
+_KNOWN_SOURCE_DIR_NAMES = {
+    "src",
+    "lib",
+    "app",
+    "apps",
+    "packages",
+    "pkg",
+    "server",
+    "client",
+    "frontend",
+    "backend",
+    "tests",
+    "test",
+    "spec",
+    "scripts",
+    "sql",
+    "migrations",
+    "config",
+    "configs",
+}
+_LIKELY_NON_SOURCE_DIR_NAMES = {
+    "analysis",
+    "build",
+    "dist",
+    "coverage",
+    "tmp",
+    "tmp_sheet1_all",
+    "tmp_sheet2_all",
+    "tmp_sheet_crops",
+    "tmp_sheet_review",
+    "pdf_previews",
+    "artifacts",
+    "artifact",
+    "apktool_out",
+    "jadx_out",
+    "raw",
+    "outputs",
+    "screenshots",
+    "previews",
+    "cache",
+}
+_CODELIKE_EXTENSIONS = {
+    ".py",
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".java",
+    ".kt",
+    ".kts",
+    ".go",
+    ".rs",
+    ".dart",
+    ".swift",
+    ".rb",
+    ".php",
+    ".scala",
+    ".c",
+    ".cc",
+    ".cpp",
+    ".h",
+    ".hpp",
+    ".cs",
+    ".m",
+    ".mm",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".fish",
+    ".ps1",
+    ".toml",
+    ".yaml",
+    ".yml",
+    ".json",
+    ".jsonc",
+    ".ini",
+    ".cfg",
+    ".conf",
+    ".sql",
+    ".proto",
+}
+
+
+def estimate_deferred_ignore_patterns(repo_root: Path) -> DeferredIgnoreSuggestion:
+    threshold_bytes = _load_auto_ignore_threshold_bytes()
+    suggestions: list[str] = []
+    events: list[dict[str, Any]] = []
+
+    try:
+        entries = sorted(repo_root.iterdir(), key=lambda entry: entry.name)
+    except OSError:
+        return DeferredIgnoreSuggestion(ignore_patterns=(), events=())
+
+    for entry in entries:
+        if not entry.is_dir():
+            continue
+        if entry.name.startswith(".") or entry.name in _KNOWN_SOURCE_DIR_NAMES:
+            continue
+        analysis = _analyze_directory(entry, threshold_bytes=threshold_bytes)
+        if analysis is None:
+            continue
+        if analysis["total_bytes"] < threshold_bytes:
+            continue
+        code_ratio = (
+            analysis["code_file_count"] / analysis["sampled_file_count"]
+            if analysis["sampled_file_count"] > 0
+            else 0.0
+        )
+        likely_non_source = (
+            entry.name.lower() in _LIKELY_NON_SOURCE_DIR_NAMES
+            or code_ratio <= 0.12
+        )
+        if not likely_non_source:
+            continue
+        rel_pattern = f"{entry.relative_to(repo_root).as_posix().rstrip('/')}/"
+        suggestions.append(rel_pattern)
+        events.append(
+            {
+                "path": rel_pattern,
+                "reason": "large-non-code-dir",
+                "size_bytes": analysis["total_bytes"],
+                "sampled_file_count": analysis["sampled_file_count"],
+                "code_file_count": analysis["code_file_count"],
+                "code_ratio": round(code_ratio, 4),
+            }
+        )
+
+    return DeferredIgnoreSuggestion(
+        ignore_patterns=tuple(suggestions),
+        events=tuple(events),
+    )
+
+
+def _load_auto_ignore_threshold_bytes() -> int:
+    raw = os.environ.get(
+        "TASKPLANE_CONTEXTATLAS_AUTO_IGNORE_THRESHOLD_BYTES",
+        str(_DEFAULT_AUTO_IGNORE_THRESHOLD_BYTES),
+    ).strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return _DEFAULT_AUTO_IGNORE_THRESHOLD_BYTES
+    if value <= 0:
+        return _DEFAULT_AUTO_IGNORE_THRESHOLD_BYTES
+    return value
+
+
+def _analyze_directory(
+    entry: Path,
+    *,
+    threshold_bytes: int,
+) -> dict[str, int] | None:
+    total_bytes = 0
+    sampled_file_count = 0
+    code_file_count = 0
+    stack = [entry]
+
+    while stack:
+        current = stack.pop()
+        try:
+            children = list(current.iterdir())
+        except OSError:
+            continue
+        for child in children:
+            if child.name.startswith("."):
+                continue
+            if child.is_dir():
+                stack.append(child)
+                continue
+            try:
+                stat = child.stat()
+            except OSError:
+                continue
+            total_bytes += int(stat.st_size)
+            if sampled_file_count < _MAX_AUTO_IGNORE_FILE_SAMPLES:
+                sampled_file_count += 1
+                if child.suffix.lower() in _CODELIKE_EXTENSIONS:
+                    code_file_count += 1
+            if total_bytes >= threshold_bytes and sampled_file_count >= 32:
+                return {
+                    "total_bytes": total_bytes,
+                    "sampled_file_count": sampled_file_count,
+                    "code_file_count": code_file_count,
+                }
+
+    return {
+        "total_bytes": total_bytes,
+        "sampled_file_count": sampled_file_count,
+        "code_file_count": code_file_count,
+    }
+
+
+def _run_contextatlas_index(
+    project_dir: Path,
+    *,
+    extra_ignore_patterns: tuple[str, ...] = (),
+) -> str | None:
+    env = os.environ.copy()
+    if extra_ignore_patterns:
+        existing = str(env.get("IGNORE_PATTERNS", "")).strip()
+        merged_patterns = [pattern for pattern in existing.split(",") if pattern.strip()]
+        for pattern in extra_ignore_patterns:
+            if pattern not in merged_patterns:
+                merged_patterns.append(pattern)
+        env["IGNORE_PATTERNS"] = ",".join(merged_patterns)
     completed = subprocess.run(
         ["contextatlas", "index", str(project_dir)],
         cwd=str(project_dir),
+        env=env,
         capture_output=True,
         text=True,
         check=False,

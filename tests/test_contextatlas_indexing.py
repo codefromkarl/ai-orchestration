@@ -12,6 +12,7 @@ from taskplane.contextatlas_indexing import (
     IndexArtifactRecord,
     RepositoryIdentity,
     SnapshotObservation,
+    estimate_deferred_ignore_patterns,
     ensure_contextatlas_index_for_checkout,
     resolve_repository_identity,
 )
@@ -229,6 +230,79 @@ def test_ensure_contextatlas_index_for_checkout_indexes_on_registry_miss(
     )
     assert artifact is not None
     assert artifact.status == "ready"
+
+
+def test_estimate_deferred_ignore_patterns_skips_large_non_code_directories(
+    monkeypatch, tmp_path
+):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "lib").mkdir()
+    (repo_root / "lib" / "main.dart").write_text("void main() {}\n", encoding="utf-8")
+    (repo_root / "analysis").mkdir()
+    monkeypatch.setenv("TASKPLANE_CONTEXTATLAS_AUTO_IGNORE_THRESHOLD_BYTES", "65536")
+    payload = b"x" * 1024
+    for index in range(256):
+        (repo_root / "analysis" / f"chunk-{index}.bin").write_bytes(payload)
+
+    suggestion = estimate_deferred_ignore_patterns(repo_root)
+
+    assert "analysis/" in suggestion.ignore_patterns
+    assert suggestion.events
+    assert suggestion.events[0]["path"] == "analysis/"
+
+
+def test_ensure_contextatlas_index_for_checkout_records_auto_ignore_event(
+    monkeypatch, tmp_path
+):
+    registry_path = tmp_path / "registry.json"
+    registry = FileIndexRegistry(registry_path)
+    recorded: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "taskplane.contextatlas_indexing.resolve_repository_identity",
+        lambda project_dir, explicit_repo=None: RepositoryIdentity(
+            project_dir=project_dir.resolve(),
+            repo_root=(tmp_path / "repo").resolve(),
+            repository_id="control:repo",
+            head_sha="abc123",
+            is_dirty=False,
+            snapshot_id="abc123",
+        ),
+    )
+    monkeypatch.setattr(
+        "taskplane.contextatlas_indexing.estimate_deferred_ignore_patterns",
+        lambda repo_root: type(
+            "Suggestion",
+            (),
+            {
+                "ignore_patterns": ("analysis/",),
+                "events": [{"path": "analysis/", "reason": "large-non-code-dir"}],
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        "taskplane.contextatlas_indexing._run_contextatlas_index",
+        lambda project_dir, extra_ignore_patterns=(): recorded.update(
+            {
+                "project_dir": project_dir,
+                "extra_ignore_patterns": tuple(extra_ignore_patterns),
+            }
+        )
+        or None,
+    )
+
+    result = ensure_contextatlas_index_for_checkout(
+        tmp_path / "fresh-checkout",
+        explicit_repo="repo",
+        registry=registry,
+    )
+
+    assert result is None
+    assert recorded["extra_ignore_patterns"] == ("analysis/",)
+    payload = json.loads(registry_path.read_text(encoding="utf-8"))
+    assert payload["deferred_events"][0]["type"] == "auto_ignore_candidate"
+    assert payload["deferred_events"][0]["ignored_patterns"] == ["analysis/"]
 
 
 def test_ensure_contextatlas_index_for_checkout_can_be_skipped_by_env(
