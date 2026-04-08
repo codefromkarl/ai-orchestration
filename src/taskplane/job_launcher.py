@@ -152,14 +152,13 @@ def build_story_command(
     resolved_force_shell_executor = (
         force_shell_executor
         if force_shell_executor is not None
-        else os.environ.get("TASKPLANE_STORY_FORCE_SHELL_EXECUTOR", "")
-        .strip()
-        .lower()
+        else os.environ.get("TASKPLANE_STORY_FORCE_SHELL_EXECUTOR", "").strip().lower()
         in {"1", "true", "yes"}
     )
 
     env_prefix = (
         f"export TASKPLANE_DSN={shlex.quote(dsn)}; "
+        "export TASKPLANE_EXECUTION_JOB_PID=$$; "
         "export TASKPLANE_OPENCODE_TIMEOUT_SECONDS=1800; "
         "export TASKPLANE_CODEX_TIMEOUT_SECONDS=1800; "
         "unset GITHUB_TOKEN; "
@@ -168,8 +167,7 @@ def build_story_command(
         env_prefix += "export TASKPLANE_FORCE_SHELL_EXECUTOR=1; "
 
     command = (
-        env_prefix
-        + "python3 -m taskplane.story_runner_cli "
+        env_prefix + "python3 -m taskplane.story_runner_cli "
         f"--story-issue-number {story_issue_number} "
         f"--worker-name {shlex.quote(f'supervisor-story-{story_issue_number}')} "
         f"--workdir {shlex.quote(str(project_dir))} "
@@ -209,6 +207,7 @@ def insert_execution_job(
     pid: int,
     command: str,
     log_path: str,
+    orchestrator_session_id: str | None = None,
 ) -> None:
     """
     Insert a new execution job record.
@@ -240,9 +239,10 @@ def insert_execution_job(
                 worker_name,
                 pid,
                 command,
-                log_path
+                log_path,
+                orchestrator_session_id
             )
-            VALUES (%s, %s, 'running', %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, 'running', %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 repo,
@@ -255,6 +255,7 @@ def insert_execution_job(
                 pid,
                 command,
                 log_path,
+                orchestrator_session_id,
             ),
         )
     connection.commit()

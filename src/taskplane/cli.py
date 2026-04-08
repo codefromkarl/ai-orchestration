@@ -12,6 +12,7 @@ from .git_committer import build_git_committer
 from .models import ExecutionGuardrailContext, VerificationEvidence, WorkItem
 from .protocols import ExecutorAdapter, VerifierAdapter
 from .settings import load_postgres_settings_from_env
+from .settings import load_taskplane_config, TaskplaneConfig
 from .worker import ExecutionResult, WorkerCycleResult, run_worker_cycle
 from .workspace import WorkspaceManager
 
@@ -21,6 +22,7 @@ DEFAULT_VERIFIER_COMMAND = "python3 -m taskplane.task_verifier"
 def main(
     argv: Sequence[str] | None = None,
     *,
+    config_loader: Callable[[], TaskplaneConfig] = load_taskplane_config,
     repository_builder: Callable[..., object] = build_postgres_repository,
     cycle_runner: Callable[..., WorkerCycleResult] = run_worker_cycle,
     executor_builder: Callable[..., ExecutorAdapter] = build_task_executor,
@@ -28,14 +30,22 @@ def main(
     committer_builder: Callable[..., object] = build_git_committer,
 ) -> int:
     args = _build_parser().parse_args(list(argv) if argv is not None else None)
+    config = config_loader()
     settings = load_postgres_settings_from_env()
     os.environ["TASKPLANE_DSN"] = settings.dsn
     frozen_prefixes = tuple(args.frozen_prefix) or ("docs/authority/",)
     workdir = Path(args.workdir).resolve()
     verifier_command = args.verifier_command or DEFAULT_VERIFIER_COMMAND
+    resolved_executor_command = (
+        args.executor_command
+        or _resolve_repo_default_executor_command(
+            config=config,
+            repo=_resolve_repo_for_workdir(config=config, workdir=workdir),
+        )
+    )
     _run_cli_preflight(
         workdir=workdir,
-        executor_command=args.executor_command,
+        executor_command=resolved_executor_command,
         verifier_command=verifier_command,
         worktree_root=Path(args.worktree_root).resolve()
         if args.worktree_root
@@ -47,9 +57,9 @@ def main(
         frozen_prefixes=frozen_prefixes,
     )
     executor = _default_executor
-    if args.executor_command:
+    if resolved_executor_command:
         executor = executor_builder(
-            command_template=args.executor_command,
+            command_template=resolved_executor_command,
             workdir=workdir,
             dsn=settings.dsn,
         )
@@ -163,6 +173,36 @@ def _validate_worktree_root(worktree_root: Path) -> None:
 
 def _is_virtual_llm_command(command: str) -> bool:
     return command.strip().lower().startswith("llm://")
+
+
+def _resolve_repo_for_workdir(*, config: TaskplaneConfig, workdir: Path) -> str | None:
+    normalized = str(workdir.resolve())
+    for repo, mapped_workdir in config.console_repo_workdirs.items():
+        if str(Path(mapped_workdir).resolve()) == normalized:
+            return repo
+    return None
+
+
+def _resolve_repo_default_executor_command(
+    *, config: TaskplaneConfig, repo: str | None
+) -> str | None:
+    if not repo:
+        return None
+    executor_name = (config.workflow_repo_default_executor.get(repo) or "").strip()
+    if not executor_name:
+        return None
+    return _executor_name_to_command(executor_name)
+
+
+def _executor_name_to_command(executor_name: str) -> str | None:
+    normalized = executor_name.strip().lower()
+    mapping = {
+        "opencode": "python3 -m taskplane.opencode_task_executor",
+        "codex": "python3 -m taskplane.codex_task_executor",
+        "claude-code": "python3 -m taskplane.claude_code_task_executor",
+        "claude_code": "python3 -m taskplane.claude_code_task_executor",
+    }
+    return mapping.get(normalized)
 
 
 if __name__ == "__main__":

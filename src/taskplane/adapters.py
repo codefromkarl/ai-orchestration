@@ -127,12 +127,13 @@ def build_task_verifier(
 def build_controlled_executor(
     *, workdir: Path, command_template: str | None = None
 ) -> ExecutorAdapter:
-    runner_module = (
-        "codex_task_executor"
-        if command_template
-        and "taskplane.codex_task_executor" in command_template
-        else "opencode_task_executor"
-    )
+    normalized_command = (command_template or "").strip()
+    if "taskplane.codex_task_executor" in normalized_command:
+        runner_module = "codex_task_executor"
+    elif "taskplane.claude_code_task_executor" in normalized_command:
+        runner_module = "claude_code_task_executor"
+    else:
+        runner_module = "opencode_task_executor"
     command_digest = f"python -m taskplane.{runner_module}"
 
     def _executor(
@@ -149,6 +150,15 @@ def build_controlled_executor(
                 from .codex_task_executor import run_controlled_codex_task
 
                 runner = lambda: run_controlled_codex_task(
+                    work_id=work_item.id,
+                    dsn=_load_required_env("TASKPLANE_DSN"),
+                    project_dir=effective_workdir,
+                    resume_context=_load_resume_context(execution_context),
+                )
+            elif runner_module == "claude_code_task_executor":
+                from .claude_code_task_executor import run_controlled_claude_code_task
+
+                runner = lambda: run_controlled_claude_code_task(
                     work_id=work_item.id,
                     dsn=_load_required_env("TASKPLANE_DSN"),
                     project_dir=effective_workdir,
@@ -233,7 +243,9 @@ def build_browser_executor(
                 }
             else:
                 dom = browser.get_dom(command_spec["url"])
-                artifact_path = str(work_path / ".run-logs" / "browser" / "dom_extract.json")
+                artifact_path = str(
+                    work_path / ".run-logs" / "browser" / "dom_extract.json"
+                )
                 payload = {
                     "outcome": "done",
                     "summary": f"browser DOM extracted: {dom.title or dom.url}",
@@ -283,9 +295,7 @@ def build_task_executor(
 
             router = ExecutorRouter(
                 dsn,
-                default_executor_name=os.environ.get(
-                    "TASKPLANE_DEFAULT_EXECUTOR"
-                ),
+                default_executor_name=os.environ.get("TASKPLANE_DEFAULT_EXECUTOR"),
             )
         except Exception:
             router = None

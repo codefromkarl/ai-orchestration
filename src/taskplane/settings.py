@@ -33,6 +33,9 @@ class TaskplaneConfig:
     supervisor_repo_story_force_shell_executor: dict[str, bool] = field(
         default_factory=dict
     )
+    workflow_repo_default_executor: dict[str, str] = field(default_factory=dict)
+    workflow_repo_fallback_executor: dict[str, str] = field(default_factory=dict)
+    workflow_repo_planning_executor: dict[str, str] = field(default_factory=dict)
     dev_compose_file: Path = field(
         default_factory=lambda: Path("ops/docker-compose.nocodb.yml")
     )
@@ -57,11 +60,12 @@ def load_taskplane_config(config_path: str | Path | None = None) -> TaskplaneCon
     postgres = _get_table(payload, "postgres")
     console = _get_table(payload, "console")
     supervisor = _get_table(payload, "supervisor")
+    workflow = _get_table(payload, "workflow")
     dev = _get_table(payload, "dev")
 
-    postgres_dsn = os.getenv("TASKPLANE_DSN", "").strip() or str(
-        postgres.get("dsn", "")
-    ).strip()
+    postgres_dsn = (
+        os.getenv("TASKPLANE_DSN", "").strip() or str(postgres.get("dsn", "")).strip()
+    )
     console_repo_workdirs = _load_mapping(
         env_var="TASKPLANE_CONSOLE_REPO_WORKDIRS_JSON",
         file_value=console.get("repo_workdirs"),
@@ -86,6 +90,21 @@ def load_taskplane_config(config_path: str | Path | None = None) -> TaskplaneCon
         env_var="TASKPLANE_SUPERVISOR_REPO_STORY_FORCE_SHELL_EXECUTOR_JSON",
         file_value=supervisor.get("repo_story_force_shell_executor"),
         label="supervisor.repo_story_force_shell_executor",
+    )
+    workflow_repo_default_executor = _load_mapping(
+        env_var="TASKPLANE_WORKFLOW_REPO_DEFAULT_EXECUTOR_JSON",
+        file_value=workflow.get("repo_default_executor"),
+        label="workflow.repo_default_executor",
+    )
+    workflow_repo_fallback_executor = _load_mapping(
+        env_var="TASKPLANE_WORKFLOW_REPO_FALLBACK_EXECUTOR_JSON",
+        file_value=workflow.get("repo_fallback_executor"),
+        label="workflow.repo_fallback_executor",
+    )
+    workflow_repo_planning_executor = _load_mapping(
+        env_var="TASKPLANE_WORKFLOW_REPO_PLANNING_EXECUTOR_JSON",
+        file_value=workflow.get("repo_planning_executor"),
+        label="workflow.repo_planning_executor",
     )
     dev_compose_file = Path(
         os.getenv("TASKPLANE_DEV_COMPOSE_FILE", "").strip()
@@ -112,6 +131,9 @@ def load_taskplane_config(config_path: str | Path | None = None) -> TaskplaneCon
         supervisor_repo_story_force_shell_executor=(
             supervisor_repo_story_force_shell_executor
         ),
+        workflow_repo_default_executor=workflow_repo_default_executor,
+        workflow_repo_fallback_executor=workflow_repo_fallback_executor,
+        workflow_repo_planning_executor=workflow_repo_planning_executor,
         dev_compose_file=dev_compose_file,
         dev_env_file=dev_env_file,
     )

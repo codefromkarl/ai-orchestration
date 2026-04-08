@@ -137,12 +137,53 @@ def test_cli_main_uses_task_verifier_by_default(monkeypatch, tmp_path):
     )
 
     assert exit_code == 0
-    assert (
-        captured["verifier_command"]
-        == "python3 -m taskplane.task_verifier"
-    )
+    assert captured["verifier_command"] == "python3 -m taskplane.task_verifier"
     assert captured["verifier_workdir"] == tmp_path
     assert captured["verifier_check_type"] == "pytest"
+
+
+def test_cli_main_uses_repo_default_executor_when_not_explicitly_provided(
+    monkeypatch, tmp_path
+):
+    from taskplane.settings import TaskplaneConfig
+
+    monkeypatch.setenv(
+        "TASKPLANE_DSN",
+        "postgresql://user:pass@localhost:5432/stardrifter",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_config_loader():
+        return TaskplaneConfig(
+            postgres_dsn="postgresql://user:pass@localhost:5432/stardrifter",
+            console_repo_workdirs={"owner/repo": str(tmp_path.resolve())},
+            workflow_repo_default_executor={"owner/repo": "codex"},
+        )
+
+    def fake_repository_builder(*, dsn: str):
+        return object()
+
+    def fake_executor_builder(*, command_template: str, workdir: Path, dsn=None):
+        captured["executor_command"] = command_template
+        captured["executor_workdir"] = workdir
+        return _fake_executor
+
+    def fake_cycle_runner(**kwargs):
+        captured["executor"] = kwargs["executor"]
+        return WorkerCycleResult(claimed_work_id=None)
+
+    exit_code = main(
+        ["--workdir", str(tmp_path)],
+        config_loader=fake_config_loader,
+        repository_builder=fake_repository_builder,
+        cycle_runner=fake_cycle_runner,
+        executor_builder=fake_executor_builder,
+        verifier_builder=lambda **kwargs: _fake_verifier,
+        committer_builder=lambda **kwargs: object(),
+    )
+
+    assert exit_code == 0
+    assert captured["executor_command"] == "python3 -m taskplane.codex_task_executor"
 
 
 def test_story_runner_cli_builds_routed_task_executor_when_command_is_provided(

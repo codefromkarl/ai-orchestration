@@ -3,6 +3,8 @@ from taskplane.story_runner_cli import main
 
 
 def test_story_runner_cli_loads_story_items_and_runs(monkeypatch, capsys):
+    from taskplane.settings import TaskplaneConfig
+
     monkeypatch.setenv(
         "TASKPLANE_DSN",
         "postgresql://user:pass@localhost:5432/stardrifter",
@@ -13,7 +15,9 @@ def test_story_runner_cli_loads_story_items_and_runs(monkeypatch, capsys):
         captured["dsn"] = dsn
         return object()
 
-    def fake_story_loader(*, repository, story_issue_number: int, repo: str | None = None):
+    def fake_story_loader(
+        *, repository, story_issue_number: int, repo: str | None = None
+    ):
         captured["repository"] = repository
         captured["story_issue_number"] = story_issue_number
         captured["repo"] = repo
@@ -58,6 +62,9 @@ def test_story_runner_cli_loads_story_items_and_runs(monkeypatch, capsys):
             "--allowed-wave",
             "wave-2",
         ],
+        config_loader=lambda: TaskplaneConfig(
+            postgres_dsn="postgresql://user:pass@localhost:5432/stardrifter"
+        ),
         repository_builder=fake_repository_builder,
         story_loader=fake_story_loader,
         story_runner=fake_story_runner,
@@ -132,7 +139,9 @@ def test_story_runner_cli_passes_repo_to_story_loader_when_provided(
     )
     captured: dict[str, object] = {}
 
-    def fake_story_loader(*, repository, story_issue_number: int, repo: str | None = None):
+    def fake_story_loader(
+        *, repository, story_issue_number: int, repo: str | None = None
+    ):
         captured["repository"] = repository
         captured["story_issue_number"] = story_issue_number
         captured["repo"] = repo
@@ -236,14 +245,8 @@ def test_story_runner_cli_builds_shell_adapters_when_commands_are_provided(
     )
 
     assert exit_code == 0
-    assert (
-        captured["executor_command"]
-        == "python3 -m taskplane.opencode_task_executor"
-    )
-    assert (
-        captured["verifier_command"]
-        == "python3 -m taskplane.task_verifier"
-    )
+    assert captured["executor_command"] == "python3 -m taskplane.opencode_task_executor"
+    assert captured["verifier_command"] == "python3 -m taskplane.task_verifier"
     assert captured["executor_workdir"] == tmp_path
     assert captured["verifier_workdir"] == tmp_path
     assert captured["committer_workdir"] == tmp_path
@@ -308,13 +311,66 @@ def test_story_runner_cli_uses_task_verifier_by_default(monkeypatch, tmp_path):
     )
 
     assert exit_code == 0
-    assert (
-        captured["verifier_command"]
-        == "python3 -m taskplane.task_verifier"
-    )
+    assert captured["verifier_command"] == "python3 -m taskplane.task_verifier"
     assert captured["verifier_workdir"] == tmp_path
     assert captured["verifier_check_type"] == "pytest"
     assert captured["verifier"] == "verifier"
+
+
+def test_story_runner_cli_uses_repo_default_executor_when_not_explicitly_provided(
+    monkeypatch, tmp_path
+):
+    from taskplane.settings import TaskplaneConfig
+
+    monkeypatch.setenv(
+        "TASKPLANE_DSN",
+        "postgresql://user:pass@localhost:5432/stardrifter",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_config_loader():
+        return TaskplaneConfig(
+            postgres_dsn="postgresql://user:pass@localhost:5432/stardrifter",
+            workflow_repo_default_executor={"demo/taskplane": "claude-code"},
+        )
+
+    def fake_executor_builder(*, command_template: str, workdir, dsn=None):
+        captured["executor_command"] = command_template
+        captured["executor_workdir"] = workdir
+        return "executor"
+
+    def fake_story_runner(**kwargs):
+        captured["executor"] = kwargs["executor"]
+        return StoryRunResult(
+            story_issue_number=kwargs["story_issue_number"],
+            completed_work_item_ids=[],
+            blocked_work_item_ids=[],
+            remaining_work_item_ids=["issue-56"],
+            story_complete=False,
+        )
+
+    exit_code = main(
+        [
+            "--story-issue-number",
+            "29",
+            "--repo",
+            "demo/taskplane",
+            "--workdir",
+            str(tmp_path),
+        ],
+        config_loader=fake_config_loader,
+        repository_builder=lambda *, dsn: object(),
+        story_loader=lambda **kwargs: ["issue-56"],
+        story_runner=fake_story_runner,
+        executor_builder=fake_executor_builder,
+        verifier_builder=lambda **kwargs: "verifier",
+        committer_builder=lambda **kwargs: object(),
+    )
+
+    assert exit_code == 0
+    assert (
+        captured["executor_command"] == "python3 -m taskplane.claude_code_task_executor"
+    )
 
 
 def test_story_runner_cli_builds_story_verifier_when_command_is_provided(
@@ -453,3 +509,51 @@ def test_story_runner_cli_builds_workspace_manager_when_worktree_root_is_provide
     assert captured["ignored_dirty_path_prefixes"] == ("worktrees/",)
     assert captured["promotion_repo_root"] == tmp_path / "promotion"
     assert captured["story_integrator"] == "story-integrator"
+
+
+def test_story_runner_cli_finalizes_execution_job_when_parent_pid_is_provided(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv(
+        "TASKPLANE_DSN",
+        "postgresql://user:pass@localhost:5432/stardrifter",
+    )
+    monkeypatch.setenv("TASKPLANE_EXECUTION_JOB_PID", "4567")
+    captured: dict[str, object] = {}
+
+    def fake_finalizer(**kwargs):
+        captured.update(kwargs)
+
+    exit_code = main(
+        [
+            "--story-issue-number",
+            "176",
+            "--repo",
+            "local/pogongshichongzou",
+            "--worker-name",
+            "supervisor-story-176",
+            "--workdir",
+            str(tmp_path),
+        ],
+        repository_builder=lambda *, dsn: object(),
+        story_loader=lambda **kwargs: ["work-1"],
+        story_runner=lambda **kwargs: StoryRunResult(
+            story_issue_number=176,
+            completed_work_item_ids=[],
+            blocked_work_item_ids=["work-1"],
+            remaining_work_item_ids=[],
+            story_complete=False,
+        ),
+        verifier_builder=lambda **kwargs: "verifier",
+        committer_builder=lambda **kwargs: object(),
+        execution_job_finalizer=fake_finalizer,
+    )
+
+    assert exit_code == 0
+    assert captured["dsn"] == "postgresql://user:pass@localhost:5432/stardrifter"
+    assert captured["repo"] == "local/pogongshichongzou"
+    assert captured["story_issue_number"] == 176
+    assert captured["worker_name"] == "supervisor-story-176"
+    assert captured["pid"] == 4567
+    assert captured["story_complete"] is False
+    assert captured["blocked_work_item_ids"] == ["work-1"]

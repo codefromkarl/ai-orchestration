@@ -79,3 +79,18 @@ def test_build_story_command_prefers_explicit_story_runner_configuration_over_en
     assert (
         "--verifier-command 'python3 -m taskplane.task_verifier'" in command
     )
+
+
+def test_build_story_command_exports_parent_execution_job_pid(
+    tmp_path: Path,
+) -> None:
+    command = build_story_command(
+        dsn="postgresql://example",
+        story_issue_number=170,
+        allowed_waves=("wave-3",),
+        project_dir=tmp_path,
+        worktree_root=None,
+        promotion_repo_root=None,
+    )
+
+    assert "export TASKPLANE_EXECUTION_JOB_PID=$$;" in command

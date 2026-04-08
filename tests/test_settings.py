@@ -24,11 +24,20 @@ dsn = "postgresql://user:pass@localhost:5432/taskplane"
 [supervisor.repo_story_verifier_commands]
 "owner/repo" = "python3 -m taskplane.task_verifier"
 
-[supervisor.repo_story_force_shell_executor]
-"owner/repo" = false
+        [supervisor.repo_story_force_shell_executor]
+        "owner/repo" = false
 
-[dev]
-compose_file = "ops/docker-compose.nocodb.yml"
+        [workflow.repo_default_executor]
+        "owner/repo" = "opencode"
+
+        [workflow.repo_fallback_executor]
+        "owner/repo" = "codex"
+
+        [workflow.repo_planning_executor]
+        "owner/repo" = "claude-code"
+
+        [dev]
+        compose_file = "ops/docker-compose.nocodb.yml"
 env_file = ".env.local"
 """.strip(),
         encoding="utf-8",
@@ -48,6 +57,9 @@ env_file = ".env.local"
         "owner/repo": "python3 -m taskplane.task_verifier"
     }
     assert config.supervisor_repo_story_force_shell_executor == {"owner/repo": False}
+    assert config.workflow_repo_default_executor == {"owner/repo": "opencode"}
+    assert config.workflow_repo_fallback_executor == {"owner/repo": "codex"}
+    assert config.workflow_repo_planning_executor == {"owner/repo": "claude-code"}
     assert config.dev_compose_file == Path("ops/docker-compose.nocodb.yml")
     assert config.dev_env_file == Path(".env.local")
 
@@ -114,6 +126,4 @@ def test_load_taskplane_config_allows_env_override_for_supervisor_story_commands
     assert config.supervisor_repo_story_executor_commands == {
         "demo/taskplane": "python3 -m taskplane.opencode_task_executor"
     }
-    assert config.supervisor_repo_story_force_shell_executor == {
-        "demo/taskplane": True
-    }
+    assert config.supervisor_repo_story_force_shell_executor == {"demo/taskplane": True}

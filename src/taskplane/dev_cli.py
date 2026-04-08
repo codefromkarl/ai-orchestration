@@ -23,6 +23,7 @@ CORE_MIGRATIONS = (
     "005_dlq_and_observability.sql",
     "006_executor_routing_profiles.sql",
     "008_repo_registry.sql",
+    "009_orchestrator_session.sql",
 )
 
 
@@ -204,7 +205,7 @@ def _run_supervise_command(
     worktree_root = (
         resolve_config_path(args.worktree_root, source_path=config.source_path)
         if args.worktree_root
-        else None
+        else (project_dir / ".taskplane" / "worktrees").resolve()
     )
     promotion_repo_root = (
         resolve_config_path(args.promotion_repo_root, source_path=config.source_path)

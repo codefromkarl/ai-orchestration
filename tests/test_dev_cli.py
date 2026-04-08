@@ -54,9 +54,9 @@ def test_dev_up_runs_compose_and_core_migrations(tmp_path):
         "psql",
         "postgresql://user:pass@localhost:5432/taskplane",
         "-f",
-        str(tmp_path / "sql" / "006_executor_routing_profiles.sql"),
+        str(tmp_path / "sql" / "009_orchestrator_session.sql"),
     ]
-    assert len(captured) == 8
+    assert len(captured) == 10
 
 
 def test_dev_up_falls_back_to_psycopg_when_psql_is_missing(tmp_path):
@@ -91,7 +91,7 @@ def test_dev_up_falls_back_to_psycopg_when_psql_is_missing(tmp_path):
     )
 
     assert exit_code == 0
-    assert len(migration_calls) == 7
+    assert len(migration_calls) == 9
     assert migration_calls[0] == (
         "postgresql://user:pass@localhost:5432/taskplane",
         str(tmp_path / "sql" / "control_plane_schema.sql"),
@@ -149,12 +149,9 @@ def test_dev_supervise_once_uses_repo_mappings_from_taskplane_config(tmp_path):
     assert captured["repo"] == "demo/taskplane"
     assert captured["project_dir"] == tmp_path
     assert captured["log_dir"] == tmp_path / "logs"
+    assert captured["worktree_root"] == tmp_path / ".taskplane" / "worktrees"
     assert (
-        captured["story_executor_command"]
-        == "python3 -m taskplane.codex_task_executor"
+        captured["story_executor_command"] == "python3 -m taskplane.codex_task_executor"
     )
-    assert (
-        captured["story_verifier_command"]
-        == "python3 -m taskplane.task_verifier"
-    )
+    assert captured["story_verifier_command"] == "python3 -m taskplane.task_verifier"
     assert captured["story_force_shell_executor"] is False
