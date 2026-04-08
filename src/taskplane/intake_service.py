@@ -15,7 +15,9 @@ from .repository import ControlPlaneRepository
 
 
 class IntakeAnalyzer(Protocol):
-    def __call__(self, *, repo: str, conversation: list[dict[str, str]]) -> dict[str, Any]: ...
+    def __call__(
+        self, *, repo: str, conversation: list[dict[str, str]]
+    ) -> dict[str, Any]: ...
 
 
 class NaturalLanguageIntakeService:
@@ -63,6 +65,7 @@ class NaturalLanguageIntakeService:
             intent_id=intent.id,
             proposal=intent.proposal_json,
             approver=approver,
+            promotion_mode=str(intent.proposal_json.get("promotion_mode") or "local"),
         )
         promoted = replace(
             intent,
@@ -158,7 +161,9 @@ class NaturalLanguageIntakeService:
             summary=summary,
             clarification_questions=questions,
             proposal_json=proposal,
-            analysis_model=str(payload.get("analysis_model") or intent.analysis_model or ""),
+            analysis_model=str(
+                payload.get("analysis_model") or intent.analysis_model or ""
+            ),
             updated_at=datetime.now(UTC),
         )
 
@@ -168,7 +173,9 @@ class LLMIntakeAnalyzer:
         self.settings = load_executor_model_settings_from_env()
         self.client = build_model_client(self.settings.provider)
 
-    def __call__(self, *, repo: str, conversation: list[dict[str, str]]) -> dict[str, Any]:
+    def __call__(
+        self, *, repo: str, conversation: list[dict[str, str]]
+    ) -> dict[str, Any]:
         prompt = _build_intake_prompt(repo=repo, conversation=conversation)
         raw = self.client.complete_text(
             model=self.settings.executor_model,
@@ -185,7 +192,9 @@ class LLMIntakeAnalyzer:
         return payload
 
 
-def build_default_analyzer(repository: ControlPlaneRepository | None = None) -> IntakeAnalyzer:
+def build_default_analyzer(
+    repository: ControlPlaneRepository | None = None,
+) -> IntakeAnalyzer:
     provider_settings = load_provider_settings_from_env()
     model_settings = load_executor_model_settings_from_env()
     provider = model_settings.provider.lower()
@@ -198,11 +207,14 @@ def build_default_analyzer(repository: ControlPlaneRepository | None = None) -> 
 
 
 class HeuristicIntakeAnalyzer:
-    def __call__(self, *, repo: str, conversation: list[dict[str, str]]) -> dict[str, Any]:
+    def __call__(
+        self, *, repo: str, conversation: list[dict[str, str]]
+    ) -> dict[str, Any]:
         user_messages = [
             str(message.get("content") or "").strip()
             for message in conversation
-            if str(message.get("role") or "") == "user" and str(message.get("content") or "").strip()
+            if str(message.get("role") or "") == "user"
+            and str(message.get("content") or "").strip()
         ]
         latest = user_messages[-1] if user_messages else ""
         combined = "\n".join(user_messages).strip()
@@ -326,7 +338,19 @@ def _derive_story_payloads(text: str) -> list[dict[str, Any]]:
     normalized = text.lower()
     stories: list[dict[str, Any]] = []
 
-    if any(keyword in normalized for keyword in ("api", "backend", "后端", "接口", "auth", "认证", "token", "jwt")):
+    if any(
+        keyword in normalized
+        for keyword in (
+            "api",
+            "backend",
+            "后端",
+            "接口",
+            "auth",
+            "认证",
+            "token",
+            "jwt",
+        )
+    ):
         stories.append(
             {
                 "story_key": "S1",
@@ -349,7 +373,10 @@ def _derive_story_payloads(text: str) -> list[dict[str, Any]]:
             }
         )
 
-    if any(keyword in normalized for keyword in ("frontend", "ui", "页面", "表单", "web", "前端")):
+    if any(
+        keyword in normalized
+        for keyword in ("frontend", "ui", "页面", "表单", "web", "前端")
+    ):
         stories.append(
             {
                 "story_key": f"S{len(stories) + 1}",

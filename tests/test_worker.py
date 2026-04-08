@@ -3024,6 +3024,52 @@ def test_run_worker_cycle_creates_and_releases_work_claim_with_workspace_path(tm
     assert repository.list_work_claims() == []
 
 
+def test_run_worker_cycle_releases_work_claim_after_terminal_status_without_workspace_manager():
+    repository = InMemoryControlPlaneRepository(
+        work_items=[
+            WorkItem(
+                id="task-7b",
+                title="already satisfied terminal release",
+                lane="Lane 04",
+                wave="unassigned",
+                status="pending",
+                planned_paths=("docs/domains/04-encounter-mediation/",),
+                source_issue_number=77,
+            ),
+        ],
+        dependencies=[],
+        targets_by_work_id={},
+    )
+    context = ExecutionGuardrailContext(
+        allowed_waves={"unassigned"},
+        frozen_prefixes=("docs/authority/",),
+    )
+
+    from taskplane.models import VerificationEvidence
+
+    result = run_worker_cycle(
+        repository=repository,
+        context=context,
+        worker_name="worker-a",
+        executor=lambda work_item, workspace_path=None: ExecutionResult(
+            success=True,
+            summary="already done",
+            result_payload_json={"outcome": "already_satisfied"},
+        ),
+        verifier=lambda work_item, workspace_path=None: VerificationEvidence(
+            work_id=work_item.id,
+            check_type="noop",
+            command="noop",
+            passed=True,
+            output_digest="ok",
+        ),
+    )
+
+    assert result.claimed_work_id == "task-7b"
+    assert repository.work_items_by_id["task-7b"].status == "done"
+    assert repository.list_work_claims() == []
+
+
 def test_run_worker_cycle_renews_claim_after_workspace_prepare(tmp_path):
     repository = InMemoryControlPlaneRepository(
         work_items=[

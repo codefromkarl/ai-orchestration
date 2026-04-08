@@ -29,6 +29,11 @@ from .repository import StoryDecompositionRepository
 DECOMPOSITION_RESULT_MARKER = "TASKPLANE_DECOMPOSITION_RESULT_JSON="
 
 
+class GitHubRefreshAdapter:
+    def ingest(self, *, connection: Any, repo: str) -> None:
+        refresh_control_plane_from_github(connection=connection, repo=repo)
+
+
 @dataclass(frozen=True)
 class DecompositionExecutionResult:
     success: bool
@@ -61,7 +66,6 @@ def run_story_decomposition(
     connection = getattr(repository, "_connection", repository)
     story_loader = story_loader or load_decomposition_story
     decomposer = decomposer or run_shell_story_decomposer
-    refresher = refresher or refresh_control_plane_from_github
     fallback_generator = fallback_generator or _default_story_task_fallback_generator
 
     current_story = story_loader(
@@ -69,6 +73,11 @@ def run_story_decomposition(
         repo=repo,
         story_issue_number=story_issue_number,
     )
+    if refresher is None:
+        if _is_local_story(current_story):
+            refresher = LocalNoopRefresher()
+        else:
+            refresher = GitHubRefreshAdapter()
     execution = decomposer(
         repo=repo,
         story_issue_number=story_issue_number,
@@ -232,6 +241,20 @@ def _refresh_story_until_projectable_or_exhausted(
     )
     task_count = int(refreshed_story.get("story_task_count") or 0)
     return refreshed_story, task_count, retry_execution
+
+
+def _is_local_story(story: dict[str, Any]) -> bool:
+    source_mode = str(story.get("source_mode") or "").strip().lower()
+    if source_mode in {"local", "local_intake", "local-first", "local_first"}:
+        return True
+    source_issue_number = story.get("source_issue_number")
+    return source_issue_number in (None, "", 0)
+
+
+class LocalNoopRefresher:
+    def ingest(self, *, connection: Any, repo: str) -> None:
+        del connection, repo
+        return None
 
 
 def _should_retry_zero_projectable_outcome(

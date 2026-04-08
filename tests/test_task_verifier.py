@@ -2,7 +2,9 @@ from pathlib import Path
 
 from taskplane.task_verifier import (
     _build_verifier_env,
+    _build_dart_test_command,
     _extract_explicit_commands,
+    _extract_dart_test_targets_from_changed_paths,
     _extract_pytest_targets_from_changed_paths,
     _extract_pytest_targets,
     _resolve_verification_commands,
@@ -119,6 +121,57 @@ def test_extract_pytest_targets_from_changed_paths_infers_godot_runtime_test_fro
     ]
 
 
+def test_extract_dart_test_targets_from_changed_paths_infers_flutter_tests_from_lib_source(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "lib" / "features" / "run_flow").mkdir(parents=True)
+    (tmp_path / "lib" / "features" / "run_overview").mkdir(parents=True)
+    (tmp_path / "lib" / "shared" / "widgets").mkdir(parents=True)
+    (tmp_path / "test").mkdir(parents=True)
+    (tmp_path / "scripts").mkdir(parents=True)
+    (tmp_path / "scripts" / "flutterw").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    (tmp_path / "lib" / "features" / "run_flow" / "run_flow_controller.dart").write_text(
+        "class RunFlowController {}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "lib" / "features" / "run_overview" / "run_overview_page.dart").write_text(
+        "class RunOverviewPage {}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "lib" / "shared" / "widgets" / "run_layer_timeline.dart").write_text(
+        "class RunLayerTimeline {}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "test" / "run_flow_controller_test.dart").write_text(
+        "import 'package:demo/features/run_flow/run_flow_controller.dart';\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "test" / "run_overview_page_test.dart").write_text(
+        "import 'package:demo/features/run_overview/run_overview_page.dart';\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "test" / "run_layer_timeline_widget_test.dart").write_text(
+        "import 'package:demo/shared/widgets/run_layer_timeline.dart';\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(
+        "TASKPLANE_EXECUTION_CHANGED_PATHS_JSON",
+        (
+            '["lib/features/run_flow/run_flow_controller.dart",'
+            '"lib/features/run_overview/run_overview_page.dart",'
+            '"lib/shared/widgets/run_layer_timeline.dart"]'
+        ),
+    )
+
+    targets = _extract_dart_test_targets_from_changed_paths(project_dir=tmp_path)
+
+    assert targets == [
+        "test/run_flow_controller_test.dart",
+        "test/run_overview_page_test.dart",
+        "test/run_layer_timeline_widget_test.dart",
+    ]
+
+
 def test_resolve_verification_commands_returns_noop_for_docs_only_changed_paths(
     tmp_path, monkeypatch
 ):
@@ -164,6 +217,41 @@ def test_resolve_verification_commands_falls_back_to_focused_pytest_targets(tmp_
             "pytest",
             "-q",
             "tests/unit/test_campaign_topology_schema_closure.py",
+        ]
+    ]
+
+
+def test_resolve_verification_commands_prefers_focused_flutter_targets_from_changed_paths(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "lib" / "features" / "run_flow").mkdir(parents=True)
+    (tmp_path / "test").mkdir(parents=True)
+    (tmp_path / "scripts").mkdir(parents=True)
+    (tmp_path / "scripts" / "flutterw").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    (tmp_path / "lib" / "features" / "run_flow" / "run_flow_controller.dart").write_text(
+        "class RunFlowController {}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "test" / "run_flow_controller_test.dart").write_text(
+        "import 'package:demo/features/run_flow/run_flow_controller.dart';\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(
+        "TASKPLANE_EXECUTION_CHANGED_PATHS_JSON",
+        '["lib/features/run_flow/run_flow_controller.dart"]',
+    )
+
+    commands = _resolve_verification_commands(
+        title="[02-IMPL] 重构 run overview 与 flow controller",
+        body="",
+        project_dir=tmp_path,
+    )
+
+    assert commands == [
+        [
+            str(tmp_path / "scripts" / "flutterw"),
+            "test",
+            "test/run_flow_controller_test.dart",
         ]
     ]
 
@@ -318,6 +406,22 @@ def test_build_verifier_env_keeps_existing_pythonpath_when_src_missing(
     env = _build_verifier_env(tmp_path)
 
     assert env["PYTHONPATH"] == "/existing/path"
+
+
+def test_build_dart_test_command_prefers_flutter_wrapper(tmp_path):
+    (tmp_path / "scripts").mkdir(parents=True)
+    (tmp_path / "scripts" / "flutterw").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+    command = _build_dart_test_command(
+        project_dir=tmp_path,
+        targets=["test/run_flow_controller_test.dart"],
+    )
+
+    assert command == [
+        str(tmp_path / "scripts" / "flutterw"),
+        "test",
+        "test/run_flow_controller_test.dart",
+    ]
 
 
 def test_resolve_verification_commands_returns_noop_for_read_only_godot_scope(tmp_path):

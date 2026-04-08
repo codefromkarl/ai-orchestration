@@ -480,6 +480,16 @@ def run_worker_cycle(
                 work_item=repository.get_work_item(claimed_work_id),
                 repository=repository,
             )
+        else:
+            try:
+                final_work_item = repository.get_work_item(claimed_work_id)
+            except Exception:
+                final_work_item = None
+            if (
+                final_work_item is not None
+                and final_work_item.status not in {"in_progress", "verifying"}
+            ):
+                repository.delete_work_claim(claimed_work_id)
 
 
 def _best_effort_prewarm_story_workspaces(

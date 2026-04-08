@@ -421,22 +421,47 @@ def _build_prompt(
     dod_json = _normalize_dod_json(row.get("dod_json"))
     story_issue_numbers = dod_json.get("story_issue_numbers", [])
     story_text = ", ".join(f"#{number}" for number in story_issue_numbers) or "无"
-    goal_section = _extract_markdown_section(issue_body, {"目标", "Goal"})
-    allowed_modify = _extract_markdown_section(issue_body, {"修改范围", "Scope"})
-    verification_section = _extract_markdown_section(
-        issue_body, {"验证方式", "Verification"}
+    local_task_brief = str(dod_json.get("task_brief") or "").strip()
+    local_acceptance = [
+        str(item).strip()
+        for item in (dod_json.get("acceptance_criteria") or [])
+        if str(item).strip()
+    ]
+    verification_spec = dod_json.get("verification_spec") or {}
+    verification_commands = (
+        [
+            str(item).strip()
+            for item in (verification_spec.get("commands") or [])
+            if str(item).strip()
+        ]
+        if isinstance(verification_spec, dict)
+        else []
     )
-    dod_section = _extract_markdown_section(
-        issue_body, {"验收标准 (DoD)", "验收标准", "DoD"}
+    goal_section = local_task_brief or _extract_markdown_section(
+        issue_body, {"目标", "Goal"}
     )
+    allowed_modify = "\n".join(
+        str(path) for path in dod_json.get("planned_paths") or [] if str(path).strip()
+    ) or _extract_markdown_section(issue_body, {"修改范围", "Scope"})
+    verification_section = "\n".join(
+        verification_commands
+    ) or _extract_markdown_section(issue_body, {"验证方式", "Verification"})
+    dod_section = "\n".join(
+        f"- {item}" for item in local_acceptance
+    ) or _extract_markdown_section(issue_body, {"验收标准 (DoD)", "验收标准", "DoD"})
     references_section = _extract_markdown_section(issue_body, {"参考", "References"})
     mode_clause = (
         "15. 当前为 bounded implementation mode：不要进行背景研究、不要做开放式仓库探索、不要尝试多阶段计划；只围绕允许修改范围完成最小必要实现，并快速给出终态 JSON。\n"
         if bounded_mode
         else ""
     )
+    task_reference = (
+        f"你正在执行 GitHub Issue #{source_issue_number}。"
+        if source_issue_number is not None
+        else f"你正在执行 Taskplane work item {row['id']}。"
+    )
     return (
-        f"你正在执行 GitHub Issue #{source_issue_number}。\n"
+        f"{task_reference}\n"
         f"Work ID: {row['id']}\n"
         f"标题: {row['title']}\n"
         f"Lane: {row['lane']}\n"

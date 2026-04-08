@@ -44,10 +44,14 @@ def promote_intent_proposal_via_cursor(
     intent_id: str,
     approver: str,
     proposal: dict[str, Any],
+    promotion_mode: str | None,
     intake_epic_start: int,
     intake_story_start: int,
     value_reader: Callable[[Any, str], Any],
 ) -> int:
+    normalized_mode = (
+        str(promotion_mode or proposal.get("promotion_mode") or "local").strip().lower()
+    )
     epic_payload, stories_payload = normalize_promotion_payload(proposal)
 
     cursor.execute(
@@ -118,11 +122,15 @@ def promote_intent_proposal_via_cursor(
                 continue
             work_id = f"intent-{intent_id}-t{story_index}-{task_index}"
             planned_paths_raw = task_payload.get("planned_paths")
-            planned_paths = [
-                str(path)
-                for path in planned_paths_raw
-                if isinstance(path, str) and path.strip()
-            ] if isinstance(planned_paths_raw, list) else []
+            planned_paths = (
+                [
+                    str(path)
+                    for path in planned_paths_raw
+                    if isinstance(path, str) and path.strip()
+                ]
+                if isinstance(planned_paths_raw, list)
+                else []
+            )
             dod_payload = {
                 "story_issue_numbers": [story_issue_number],
                 "related_story_issue_numbers": [],
@@ -140,14 +148,16 @@ def promote_intent_proposal_via_cursor(
                 (
                     work_id,
                     intent.repo,
-                    str(task_payload.get("title") or f"Task {story_index}.{task_index}"),
+                    str(
+                        task_payload.get("title") or f"Task {story_index}.{task_index}"
+                    ),
                     task_payload.get("lane")
                     or story_payload.get("lane")
                     or epic_payload.get("lane")
                     or "Lane 01",
                     task_payload.get("wave") or f"wave-{story_index}",
                     story_payload.get("complexity") or "medium",
-                    story_issue_number,
+                    None if normalized_mode == "local" else story_issue_number,
                     story_issue_number,
                     task_payload.get("task_type") or "core_path",
                     task_payload.get("blocking_mode") or "hard",
@@ -167,12 +177,18 @@ def promote_intent_proposal_via_cursor(
                 (
                     intent.repo,
                     story_issue_number,
-                    str(task_payload.get("title") or f"Task {story_index}.{task_index}"),
+                    str(
+                        task_payload.get("title") or f"Task {story_index}.{task_index}"
+                    ),
                     story_payload.get("complexity") or "medium",
-                    str(task_payload.get("title") or f"Task {story_index}.{task_index}"),
+                    str(
+                        task_payload.get("title") or f"Task {story_index}.{task_index}"
+                    ),
                     json.dumps(planned_paths, ensure_ascii=False),
                     json.dumps(task_payload.get("dod") or [], ensure_ascii=False),
-                    json.dumps(task_payload.get("verification") or [], ensure_ascii=False),
+                    json.dumps(
+                        task_payload.get("verification") or [], ensure_ascii=False
+                    ),
                     json.dumps([intent_id], ensure_ascii=False),
                 ),
             )
@@ -206,7 +222,9 @@ def promote_intent_proposal_via_cursor(
                 (story_issue_number, depends_on_issue_number),
             )
             for work_id in story_work_ids.get(story_issue_number, []):
-                for dependency_work_id in story_work_ids.get(depends_on_issue_number, []):
+                for dependency_work_id in story_work_ids.get(
+                    depends_on_issue_number, []
+                ):
                     cursor.execute(
                         """
                         INSERT INTO work_dependency (work_id, depends_on_work_id)
