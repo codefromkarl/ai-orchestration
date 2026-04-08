@@ -92,6 +92,43 @@ def test_git_committer_skips_commit_when_no_changed_paths(tmp_path):
     assert result.blocked_reason is None
 
 
+def test_git_committer_falls_back_to_canonical_story_issue_number(tmp_path):
+    repo = _init_repo(tmp_path)
+    target = repo / "notes.md"
+    target.write_text("v1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "notes.md"], cwd=repo, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True, text=True)
+
+    target.write_text("v2\n", encoding="utf-8")
+    committer = build_git_committer(workdir=repo)
+    result = committer(
+        WorkItem(
+            id="intent-abc-t2-1",
+            title="process story task",
+            lane="Lane 01",
+            wave="unassigned",
+            status="verifying",
+            source_issue_number=None,
+            canonical_story_issue_number=175,
+        ),
+        ExecutionResult(
+            success=True,
+            summary="updated docs",
+            result_payload_json={"changed_paths": ["notes.md"], "preexisting_dirty_paths": []},
+        ),
+    )
+
+    assert result.committed is True
+    log = subprocess.run(
+        ["git", "log", "-1", "--pretty=%B"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "#175" in log
+
+
 def test_git_committer_blocks_when_changed_path_was_already_dirty(tmp_path):
     repo = _init_repo(tmp_path)
     target = repo / "notes.md"
@@ -198,6 +235,44 @@ def test_git_story_integrator_merges_story_branch_into_main(tmp_path):
         capture_output=True,
         text=True,
     ).stdout
+
+
+def test_git_story_integrator_auto_detects_master_base_branch(tmp_path):
+    repo = _init_repo(tmp_path)
+    target = repo / "notes.md"
+    target.write_text("v1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "notes.md"], cwd=repo, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True, text=True)
+    subprocess.run(
+        ["git", "checkout", "-b", "story/42"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    target.write_text("v2\n", encoding="utf-8")
+    subprocess.run(["git", "add", "notes.md"], cwd=repo, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "commit", "-m", "story change"], cwd=repo, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "checkout", "master"], cwd=repo, check=True, capture_output=True, text=True)
+
+    integrator = build_git_story_integrator(repo_root=repo)
+    result = integrator(
+        story_issue_number=42,
+        story_work_items=[
+            WorkItem(
+                id="issue-70",
+                title="task 70",
+                lane="Lane 01",
+                wave="wave-1",
+                status="done",
+                source_issue_number=70,
+                canonical_story_issue_number=42,
+            )
+        ],
+    )
+
+    assert result.merged is True
+    assert result.blocked_reason is None
 
 
 def test_git_story_integrator_ignores_worktree_facility_directory_when_checking_dirty_base(tmp_path):

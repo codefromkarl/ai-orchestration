@@ -6,7 +6,7 @@ import subprocess
 from typing import TYPE_CHECKING, Callable
 
 from .models import WorkItem
-from .workspace import build_workspace_spec
+from .workspace import build_workspace_spec, resolve_base_branch
 
 if TYPE_CHECKING:
     from .worker import ExecutionResult
@@ -62,8 +62,10 @@ def build_git_committer(
                 summary="cannot safely auto-commit paths that were already dirty before task execution",
             )
 
-        issue_number = work_item.source_issue_number or _parse_issue_number(
-            work_item.id
+        issue_number = (
+            work_item.source_issue_number
+            or work_item.canonical_story_issue_number
+            or _parse_issue_number(work_item.id)
         )
         commit_scope = _infer_commit_scope(changed_paths)
         commit_message = (
@@ -125,10 +127,10 @@ def build_git_committer(
 def build_git_story_integrator(
     *,
     repo_root: Path,
-    base_branch: str = "main",
+    base_branch: str | None = None,
     ignored_dirty_path_prefixes: tuple[str, ...] = (),
     promotion_repo_root: Path | None = None,
-    promotion_base_branch: str = "main",
+    promotion_base_branch: str | None = None,
     promotion_ignored_dirty_path_prefixes: tuple[str, ...] = (),
 ) -> Callable[..., StoryIntegrationResult]:
     resolved_repo_root = Path(repo_root).resolve()
@@ -141,6 +143,15 @@ def build_git_story_integrator(
         story_issue_number: int,
         story_work_items: list[WorkItem],
     ) -> StoryIntegrationResult:
+        resolved_base_branch = base_branch or resolve_base_branch(resolved_repo_root)
+        resolved_promotion_base_branch = (
+            promotion_base_branch
+            or (
+                resolve_base_branch(resolved_promotion_repo_root)
+                if resolved_promotion_repo_root is not None
+                else resolved_base_branch
+            )
+        )
         representative = _select_story_representative(
             story_issue_number=story_issue_number,
             story_work_items=story_work_items,
@@ -160,7 +171,7 @@ def build_git_story_integrator(
             resolved_repo_root,
             ["git", "branch", "--show-current"],
         )
-        if current_branch != base_branch:
+        if current_branch != resolved_base_branch:
             return StoryIntegrationResult(
                 merged=False,
                 blocked_reason="base_branch_not_checked_out",
@@ -176,18 +187,18 @@ def build_git_story_integrator(
             return StoryIntegrationResult(
                 merged=False,
                 blocked_reason="dirty_base_branch",
-                summary=f"refusing to merge {branch_name} into dirty {base_branch}",
+                summary=f"refusing to merge {branch_name} into dirty {resolved_base_branch}",
             )
         if _is_branch_merged(
             repo_root=resolved_repo_root,
             branch_name=branch_name,
-            base_branch=base_branch,
+            base_branch=resolved_base_branch,
         ):
             promotion_result = _promote_base_branch(
                 source_repo_root=resolved_repo_root,
-                source_branch=base_branch,
+                source_branch=resolved_base_branch,
                 target_repo_root=resolved_promotion_repo_root,
-                target_base_branch=promotion_base_branch,
+                target_base_branch=resolved_promotion_base_branch,
                 ignored_dirty_path_prefixes=promotion_ignored_dirty_path_prefixes,
             )
             if promotion_result.blocked_reason is not None:
@@ -211,7 +222,7 @@ def build_git_story_integrator(
                 promoted=promotion_result.promoted,
                 promotion_commit_sha=promotion_result.promotion_commit_sha,
                 summary=promotion_result.summary
-                or f"{branch_name} already merged into {base_branch}",
+                or f"{branch_name} already merged into {resolved_base_branch}",
             )
 
         if not _branch_exists(repo_root=resolved_repo_root, branch_name=branch_name):
@@ -234,7 +245,7 @@ def build_git_story_integrator(
             return StoryIntegrationResult(
                 merged=False,
                 blocked_reason="story_merge_conflict",
-                summary=f"failed to merge {branch_name} into {base_branch}",
+                summary=f"failed to merge {branch_name} into {resolved_base_branch}",
             )
 
         merge_commit_sha = _run_git_stdout(
@@ -243,9 +254,9 @@ def build_git_story_integrator(
         )
         promotion_result = _promote_base_branch(
             source_repo_root=resolved_repo_root,
-            source_branch=base_branch,
+            source_branch=resolved_base_branch,
             target_repo_root=resolved_promotion_repo_root,
-            target_base_branch=promotion_base_branch,
+            target_base_branch=resolved_promotion_base_branch,
             ignored_dirty_path_prefixes=promotion_ignored_dirty_path_prefixes,
         )
         if promotion_result.blocked_reason is not None:
@@ -263,7 +274,7 @@ def build_git_story_integrator(
             promoted=promotion_result.promoted,
             promotion_commit_sha=promotion_result.promotion_commit_sha,
             summary=promotion_result.summary
-            or f"merged {branch_name} into {base_branch}",
+            or f"merged {branch_name} into {resolved_base_branch}",
         )
 
     return _integrator
