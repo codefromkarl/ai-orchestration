@@ -221,4 +221,12 @@ taskplane-workflow handle --session <session-id> --approve
 - 当前版本仍处于 MVP / active development 阶段。
 - 仓库已经具备 PostgreSQL 控制面、自然语言 intake、story/task 执行链路、执行器路由和 operator console。
 - README 首页只保留项目定位和最小上手路径；详细 API、治理策略和验证设计已下沉到 `docs/`。
-- 当前仓库未提供 `LICENSE` 文件，因此不在首页声明开源许可。
+- 本项目基于 [MIT License](./LICENSE) 开源。
+
+## 友情链接
+
+- [Linux.do](https://linux.do/) — 开源技术社区
+
+## License
+
+本项目基于 [MIT License](./LICENSE) 发布。
